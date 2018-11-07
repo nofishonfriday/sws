@@ -626,6 +626,7 @@
       <Filter>Core\Utils</Filter>
     </ClInclude>
     <ClInclude Include="nofish\NF_ReaScript.h">
+    <ClInclude Include="nofish\NF_DialogueLoudness.h">
       <Filter>nofish</Filter>
     </ClInclude>
     <ClInclude Include="Autorender\RenderRegion.h">
@@ -1275,6 +1276,7 @@
     <ClCompile Include="Utility\win32-utf8.cpp">
       <Filter>Core\Utils</Filter>
     </ClCompile>
+    <ClCompile Include="nofish\NF_DialogueLoudness.cpp">
     <ClCompile Include="nofish\NF_ReaScript.cpp">
       <Filter>nofish</Filter>
     </ClCompile>

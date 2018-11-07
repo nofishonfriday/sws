@@ -74,7 +74,7 @@ MARKERACTIONS_OBJS = MarkerActions/MarkerActions.o
 MARKERLIST_OBJS    = MarkerList/MarkerListActions.o MarkerList/MarkerListClass.o MarkerList/MarkerList.o
 MISC_OBJS          = Misc/Adam.o Misc/Analysis.o Misc/Context.o Misc/FolderActions.o Misc/ItemParams.o Misc/ItemSel.o Misc/Macros.o \
                      Misc/Misc.o Misc/ProjPrefs.o Misc/RecCheck.o Misc/TrackParams.o Misc/TrackSel.o Misc/EditCursor.o
-NF_OBS             = nofish/nofish.o nofish/NF_ReaScript.o
+NF_OBS             = nofish/nofish.o nofish/NF_ReaScript.o nofish/NF_DialogueLoudness.o
 OBJECTSTATE_OBJS   = ObjectState/ObjectState.o ObjectState/TrackEnvelope.o ObjectState/TrackFX.o ObjectState/TrackSends.o 
 PADRE_OBJS         = Padre/padreActions.o Padre/padreEnvelopeProcessor.o Padre/padreMidiItemFilters.o Padre/padreMidiItemGenerators.o \
                      Padre/padreMidiItemProcBase.o Padre/padreUtils.o

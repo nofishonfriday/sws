@@ -28,12 +28,18 @@
 
 #pragma once
 
-// continuous actions
-void EraserToolInit();
+/******************************************************************************
+* Csurf                                                                       *
+******************************************************************************/
+int  NF_CSurf_Extended(int call, void* parm1, void* parm2, void* parm3);
+
+/******************************************************************************
+* Continuous actions                                                          *
+******************************************************************************/
 void NF_RegisterContinuousActions();
 
-// #514
-void UpdateMIDIGridToolbar();
-
-// register actions
-int nofish_Init();
+/******************************************************************************
+* NF init/exit                                                                *
+******************************************************************************/
+int nofish_Init(); // register actions
+void nofish_Exit();

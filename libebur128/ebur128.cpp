@@ -760,7 +760,7 @@ EBUR128_ADD_FRAMES(float)
 EBUR128_ADD_FRAMES(double)
 
 static int ebur128_gated_loudness(ebur128_state** sts, size_t size,
-                                  double* out) {
+                                  double* out, bool& applyRelativeGating) {
   struct ebur128_dq_entry* it;
   double relative_threshold = 0.0;
   double gated_loudness = 0.0;
@@ -811,13 +811,21 @@ static int ebur128_gated_loudness(ebur128_state** sts, size_t size,
                           histogram_energies[j];
         above_thresh_counter += sts[i]->d->block_energy_histogram[j];
       }
-    } else {
-      SLIST_FOREACH(it, &sts[i]->d->block_list, entries) {
-        if (it->z >= relative_threshold) {
-          ++above_thresh_counter;
-          gated_loudness += it->z;
-        }
-      }
+    } else { 
+	  if (applyRelativeGating) {
+	    SLIST_FOREACH(it, &sts[i]->d->block_list, entries) {
+		  if (it->z >= relative_threshold) {
+		    ++above_thresh_counter;
+		    gated_loudness += it->z;
+		  }
+		}
+	  }
+	  else {
+		SLIST_FOREACH(it, &sts[i]->d->block_list, entries) {
+		  ++above_thresh_counter;
+		  gated_loudness += it->z;
+		}
+	  }
     }
   }
   if (!above_thresh_counter) {
@@ -829,13 +837,13 @@ static int ebur128_gated_loudness(ebur128_state** sts, size_t size,
   return EBUR128_SUCCESS;
 }
 
-int ebur128_loudness_global(ebur128_state* st, double* out) {
-  return ebur128_gated_loudness(&st, 1, out);
+int ebur128_loudness_global(ebur128_state* st, double* out, bool applyRelativeGating) {
+  return ebur128_gated_loudness(&st, 1, out, applyRelativeGating);
 }
 
 int ebur128_loudness_global_multiple(ebur128_state** sts, size_t size,
-                                     double* out) {
-  return ebur128_gated_loudness(sts, size, out);
+                                     double* out, bool applyRelativeGating) {
+  return ebur128_gated_loudness(sts, size, out, applyRelativeGating);
 }
 
 static int ebur128_energy_in_interval(ebur128_state* st,
@@ -887,7 +895,7 @@ static int ebur128_double_cmp(const void *p1, const void *p2) {
 
 /* EBU - TECH 3342 */
 int ebur128_loudness_range_multiple(ebur128_state** sts, size_t size,
-                                    double* out) {
+                                    double* out, bool& applyRelativeGating) {
   size_t i, j;
   struct ebur128_dq_entry* it;
   double* stl_vector;
@@ -998,14 +1006,17 @@ int ebur128_loudness_range_multiple(ebur128_state** sts, size_t size,
       stl_power += stl_vector[i];
     }
     stl_power /= (double) stl_size;
-    stl_integrated = minus_twenty_decibels * stl_power;
+	if (applyRelativeGating)
+		stl_integrated = minus_twenty_decibels * stl_power;
 
     stl_relgated = stl_vector;
     stl_relgated_size = stl_size;
-    while (stl_relgated_size > 0 && *stl_relgated < stl_integrated) {
-      ++stl_relgated;
-      --stl_relgated_size;
-    }
+	if (applyRelativeGating) {
+		while (stl_relgated_size > 0 && *stl_relgated < stl_integrated) {
+			++stl_relgated;
+			--stl_relgated_size;
+		}
+	}
 
     if (stl_relgated_size) {
       h_en = stl_relgated[(size_t) ((stl_relgated_size - 1) * 0.95 + 0.5)];
@@ -1021,8 +1032,8 @@ int ebur128_loudness_range_multiple(ebur128_state** sts, size_t size,
   }
 }
 
-int ebur128_loudness_range(ebur128_state* st, double* out) {
-  return ebur128_loudness_range_multiple(&st, 1, out);
+int ebur128_loudness_range(ebur128_state* st, double* out, bool applyRelativeGating) {
+  return ebur128_loudness_range_multiple(&st, 1, out, applyRelativeGating);
 }
 
 int ebur128_sample_peak(ebur128_state* st,

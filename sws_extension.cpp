@@ -547,6 +547,7 @@ public:
 	{
 		BR_CSurf_Extended(call, parm1, parm2, parm3);
 		SNM_CSurfExtended(call, parm1, parm2, parm3);
+		NF_CSurf_Extended(call, parm1, parm2, parm3);
 		return 0;
 	}
 };
@@ -663,6 +664,7 @@ error:
 				PadreExit();
 				SNM_Exit();
 				BR_Exit();
+				nofish_Exit();
 			}
 			return 0; // makes REAPER unloading us
 		}

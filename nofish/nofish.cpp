@@ -30,6 +30,7 @@
 #include "stdafx.h"
 #include "nofish.h"
 
+#include "NF_DialogueLoudness.h"
 #include "../Breeder/BR_ContinuousActions.h"
 #include "../Breeder/BR_Util.h"
 #include "../Breeder/BR_ReaScript.h" // BR_GetMouseCursorContext(), BR_ItemAtMouseCursor()
@@ -80,6 +81,18 @@ int Main_IsMIDIGridDotted(COMMAND_T* = NULL)
 	return toggleState;
 }
 
+void UpdateMIDIGridToolbar()
+{
+	static int cmds[2] =
+	{
+		NamedCommandLookup("_NF_ME_TOGGLETRIPLET_"),
+		NamedCommandLookup("_NF_ME_TOGGLEDOTTED_"),
+	};
+	for (int i = 0; i < 2; ++i) {
+		RefreshToolbar2(ME_SECTION, cmds[i]); // when registered in ME
+	}
+}
+
 void Main_NFToggleDottedMIDI(COMMAND_T* = NULL);
 
 void Main_NFToggleTripletMIDI(COMMAND_T* = NULL)
@@ -124,18 +137,6 @@ void Main_NFToggleDottedMIDI(COMMAND_T*)
 	}
 
 	UpdateMIDIGridToolbar();
-}
-
-void UpdateMIDIGridToolbar()
-{
-	static int cmds[2] =
-	{
-		NamedCommandLookup("_NF_ME_TOGGLETRIPLET_"),
-		NamedCommandLookup("_NF_ME_TOGGLEDOTTED_"),
-	};
-	for (int i = 0; i < 2; ++i) {
-		RefreshToolbar2(ME_SECTION, cmds[i]); // when registered in ME
-	}
 }
 
 // pass through from ME to Main
@@ -399,10 +400,25 @@ static COMMAND_T g_commandTable[] =
 	{ {}, LAST_COMMAND, },
 };
 
+int NF_CSurf_Extended(int call, void* parm1, void* parm2, void* parm3)
+{
+	if (call == CSURF_EXT_RESET)
+	{
+		NF_DialogueLoudness::LoudnessUpdate();
+	}
+
+	return 0;
+}
 int nofish_Init()
 {
 	SWSRegisterCommands(g_commandTable);
+	NF_DialogueLoudness::LoudnessInitExit(true);
 	return 1;
+}
+
+void nofish_Exit()
+{
+	NF_DialogueLoudness::LoudnessInitExit(false);
 }
 
 

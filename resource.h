@@ -92,6 +92,12 @@
 #define IDC_MISC_SPEAKER                187
 #define IDD_NF_LOUDNESS_ANALYZE_PROGRESS 188 // #880
 #define IDC_ERASER                      189 // NF Eraser tool
+#define IDD_NF_DLG_LOUDNESS_ANALYZER      190 // NF Dialogue Loudness
+#define IDD_NF_DLG_LOUDNESS_ANALYZER_NORM 191
+#define IDD_NF_DLG_LOUDNESS_NORM_PROGRESS 192
+#define IDD_NF_DLG_LOUDNESS_NORMALIZE     193
+#define IDD_NF_DLG_LOUDNESS_PREF          194
+#define IDD_NF_DLG_LOUDNESS_EXPORT_FORMAT 195
 #define IDB_UP                          500
 #define IDB_DOWN                        501
 #define IDC_BUTTON1                     1000

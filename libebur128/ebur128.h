@@ -193,24 +193,29 @@ int ebur128_add_frames_double(ebur128_state* st,
  *  @param st library state.
  *  @param out integrated loudness in LUFS. -HUGE_VAL if result is negative
  *             infinity.
+ *  @param applyRelativeGating (NF mod) for use with Dialogue Loudness, since it doesn't use level gating
+ *  only applied to 'non-histogram' mode currently, since we don't use histogram ('realtime') mode in SWS
  *  @return
  *    - EBUR128_SUCCESS on success.
  *    - EBUR128_ERROR_INVALID_MODE if mode "EBUR128_MODE_I" has not been set.
  */
-int ebur128_loudness_global(ebur128_state* st, double* out);
+int ebur128_loudness_global(ebur128_state* st, double* out, bool applyRelativeGating);
 /** \brief Get global integrated loudness in LUFS across multiple instances.
  *
  *  @param sts array of library states.
  *  @param size length of sts
  *  @param out integrated loudness in LUFS. -HUGE_VAL if result is negative
  *             infinity.
+ *  @param applyRelativeGating (NF mod) for use with Dialogue Loudness
+ *  
  *  @return
  *    - EBUR128_SUCCESS on success.
  *    - EBUR128_ERROR_INVALID_MODE if mode "EBUR128_MODE_I" has not been set.
  */
 int ebur128_loudness_global_multiple(ebur128_state** sts,
                                      size_t size,
-                                     double* out);
+                                     double* out,
+                                     bool applyRelativeGating);
 
 /** \brief Get momentary loudness (last 400ms) in LUFS.
  *
@@ -240,12 +245,13 @@ int ebur128_loudness_shortterm(ebur128_state* st, double* out);
  *  @param out loudness range (LRA) in LU. Will not be changed in case of
  *             error. EBUR128_ERROR_NOMEM or EBUR128_ERROR_INVALID_MODE will be
  *             returned in this case.
+ *  @param applyRelativeGating (NF mod) for use with Dialogue Loudness
  *  @return
  *    - EBUR128_SUCCESS on success.
  *    - EBUR128_ERROR_NOMEM in case of memory allocation error.
  *    - EBUR128_ERROR_INVALID_MODE if mode "EBUR128_MODE_LRA" has not been set.
  */
-int ebur128_loudness_range(ebur128_state* st, double* out);
+int ebur128_loudness_range(ebur128_state* st, double* out, bool applyRelativeGating);
 /** \brief Get loudness range (LRA) in LU across multiple instances.
  *
  *  Calculates loudness range according to EBU 3342.
@@ -255,6 +261,10 @@ int ebur128_loudness_range(ebur128_state* st, double* out);
  *  @param out loudness range (LRA) in LU. Will not be changed in case of
  *             error. EBUR128_ERROR_NOMEM or EBUR128_ERROR_INVALID_MODE will be
  *             returned in this case.
+ *  @param applyRelativeGating (NF mod) for use with Dialogue Loudness
+ *  only applied to 'non-histogram' mode currently, since we don't use histogram ('realtime') mode in SWS
+ *  I'm currently not sure how loudness range with Dialogue scanning is measured, couldn't find anywhere
+ *  it differs from LMCorrects2 results up to ~ +-3dB
  *  @return
  *    - EBUR128_SUCCESS on success.
  *    - EBUR128_ERROR_NOMEM in case of memory allocation error.
@@ -262,7 +272,8 @@ int ebur128_loudness_range(ebur128_state* st, double* out);
  */
 int ebur128_loudness_range_multiple(ebur128_state** sts,
                                     size_t size,
-                                    double* out);
+                                    double* out,
+                                    bool &applyRelativeGating);
 
 /** \brief Get maximum sample peak of selected channel in float format.
  *

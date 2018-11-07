@@ -1,8 +1,8 @@
 /******************************************************************************
-/ BR_Loudness.cpp
+/ NF_DialogueLoudness.cpp
 /
-/ Copyright (c) 2014-2015 Dominik Martin Drzic
-/ http://forum.cockos.com/member.php?u=27094
+/ Copyright (c) 2018 nofish
+/ http://forum.cockos.com/member.php?u=6870
 / http://github.com/reaper-oss/sws
 /
 / Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -26,79 +26,84 @@
 /
 ******************************************************************************/
 #include "stdafx.h"
-#include "BR_Loudness.h"
-#include "BR_EnvelopeUtil.h"
-#include "BR_Util.h"
+#include "../nofish/NF_DialogueLoudness.h"
+#include "../Breeder/BR_EnvelopeUtil.h"
+#include "../Breeder/BR_Util.h"
 #include "../SnM/SnM_Dlg.h"
 #include "../SnM/SnM_Util.h"
 #include "../SnM/SnM.h"
 #include "../libebur128/ebur128.h"
 #include "../reaper/localize.h"
+#include "../SnM/SnM_Misc.h" // NF fix: prevent items going offline, see AnalyzeData()
+
+
+using namespace NF_DialogueLoudness;
 
 /******************************************************************************
 * Constants                                                                   *
 ******************************************************************************/
-const char* const PROJ_SETTINGS_KEY          = "<BR_LOUDNESS";
+const char* const PROJ_SETTINGS_KEY          = "<NF_DLG_LOUDNESS";
 const char* const PROJ_SETTINGS_KEY_LU       = "LU";
 const char* const PROJ_SETTINGS_KEY_GRAPH    = "GRAPH";
 
-const char* const PROJ_OBJECT_KEY              = "<BR_ANALYZED_LOUDNESS_OBJECT";
+const char* const PROJ_OBJECT_KEY              = "<NF_ANALYZED_DLG_LOUDNESS_OBJECT";
 const char* const PROJ_OBJECT_KEY_TARGET       = "TARGET";
 const char* const PROJ_OBJECT_KEY_MEASUREMENTS = "MEASUREMENTS";
 const char* const PROJ_OBJECT_KEY_STATUS       = "STATUS";
 const char* const PROJ_OBJECT_KEY_SHORT_TERM   = "PT_SHORT_TERM";
 const char* const PROJ_OBJECT_KEY_MOMENTARY    = "PT_MOMENTARY";
+const char* const PROJ_OBJECT_KEY_DLG_PERC     = "PT_DLG_PERC";
 
-const char* const LOUDNESS_KEY         = "BR - AnalyzeLoudness";
-const char* const LOUDNESS_WND         = "BR - AnalyzeLoudness WndPos" ;
-const char* const LOUDNESS_VIEW_WND    = "BR - AnalyzeLoudnessView WndPos";
-const char* const NORMALIZE_KEY        = "BR - NormalizeLoudness";
-const char* const NORMALIZE_WND        = "BR - NormalizeLoudness WndPos";
-const char* const PREF_KEY             = "BR - LoudnessPref";
-const char* const PREF_WND             = "BR - LoudnessPref WndPos";
-const char* const EXPORT_FORMAT_KEY    = "BR - LoudnessExportFormat";
-const char* const EXPORT_FORMAT_WND    = "BR - LoudnessExportFormat WndPos";
-const char* const EXPORT_FORMAT_RECENT = "BR - LoudnessExportFormat_Pattern_";
+const char* const LOUDNESS_KEY         = "NF - AnalyzeLoudness";
+const char* const LOUDNESS_WND         = "NF - AnalyzeLoudness WndPos" ;
+const char* const LOUDNESS_VIEW_WND    = "NF - AnalyzeLoudnessView WndPos";
+const char* const NORMALIZE_KEY        = "NF - NormalizeLoudness";
+const char* const NORMALIZE_WND        = "NF - NormalizeLoudness WndPos";
+const char* const PREF_KEY             = "NF - LoudnessPref";
+const char* const PREF_WND             = "NF - LoudnessPref WndPos";
+const char* const EXPORT_FORMAT_KEY    = "NF - LoudnessExportFormat";
+const char* const EXPORT_FORMAT_WND    = "NF - LoudnessExportFormat WndPos";
+const char* const EXPORT_FORMAT_RECENT = "NF - LoudnessExportFormat_Pattern_";
 
 const int EXPORT_FORMAT_RECENT_MAX      = 10;
 const int VERSION                       = 1;
 
 // Export format wildcards
-static const struct
+struct WildCardList
 {
 	const char* wildcard;
 	int osxTabs;
 	const char* desc;
-} g_wildcards[] = {
-	// !WANT_LOCALIZE_STRINGS_BEGIN:sws_DLG_180
-	{"$id",                  5, "list view id in analyze loudness dialog"},
-	{"$integrated",          3, "integrated loudness"},
-	{"$range",               4, "loudness range"},
-	{"$truepeak",            4, "true peak"},
-	{"$maxshort",            4, "maximum short-term loudness"},
-	{"$maxmomentary",        3, "maximum momentary loudness"},
-	{"$target",              4, "in case the track is analyzed, set track name, otherwise analyzed item name"},
-	{"$item",                5, "name of the analyzed item"},
-	{"$track",               4, "name of the analyzed track or parent track of the analyzed item"},
-	{"$targetnumber",        3, "in case the track is analyzed, set track number, otherwise media item number in track"},
-	{"$itemnumber",          3, "media item number in track - 1 for the first item on a track, 2 for the second..."},
-	{"$tracknumber",         3, "track number - 1 for the first track, 2 for the second..."},
-	{"$start",               4, "project start time position of the analyzed audio"},
-	{"$end",                 5, "project end time position of the analyzed audio"},
-	{"$length",              4, "time length of the analyzed audio"},
-	{"$truepeakpos",         3, "true peak time position (counting from audio start)"},
-	{"$maxshortpos",         3, "time position of maximum short-term loudness (counting from audio start)"},
-	{"$maxmomentarypos",     2, "time position of maximum momentary loudness (counting from audio start)"},
-	{"$truepeakposproj",     2, "true peak project time position"},
-	{"$maxshortposproj",     2, "project time position of maximum short-term loudness"},
-	{"$maxmomentaryposproj", 1, "project time position of maximum momentary loudness"},
-	{"$lureference",         3, "0 LU reference value set in global preferences"},
-	{"$luformat",            4, "LU unit format set in global preferences"},
-	{"$t",                   5, "inserts tab character (displayed as normal space in preview)"},
-	{"$n",                   5, "inserts newline (displayed as normal space in preview)"},
-	{"$$",                   5, "inserts $ character (normal $ works too, this is to prevent wildcard from being treated as wildcard)"},
+};
+static const WildCardList g_wildcards[] =
+{
+	{"$id",                  5, __LOCALIZE("list view id in analyze loudness dialog", "sws_DLG_180")},
+	{"$integrated",          3, __LOCALIZE("integrated loudness", "sws_DLG_180")},
+	{"$range",               4, __LOCALIZE("loudness range", "sws_DLG_180")},
+	{"$truepeak",            4, __LOCALIZE("true peak", "sws_DLG_180")},
+	{"$maxshort",            4, __LOCALIZE("maximum short-term loudness", "sws_DLG_180")},
+	{"$maxmomentary",        3, __LOCALIZE("maximum momentary loudness", "sws_DLG_180")},
+	{"$target",              4, __LOCALIZE("in case the track is analyzed, set track name, otherwise analyzed item name", "sws_DLG_180")},
+	{"$item",                5, __LOCALIZE("name of the analyzed item", "sws_DLG_180")},
+	{"$track",               4, __LOCALIZE("name of the analyzed track or parent track of the analyzed item", "sws_DLG_180")},
+	{"$targetnumber",        3, __LOCALIZE("in case the track is analyzed, set track number, otherwise media item number in track", "sws_DLG_180")},
+	{"$itemnumber",          3, __LOCALIZE("media item number in track - 1 for the first item on a track, 2 for the second...", "sws_DLG_180")},
+	{"$tracknumber",         3, __LOCALIZE("track number - 1 for the first track, 2 for the second...", "sws_DLG_180")},
+	{"$start",               4, __LOCALIZE("project start time position of the analyzed audio", "sws_DLG_180")},
+	{"$end",                 5, __LOCALIZE("project end time position of the analyzed audio", "sws_DLG_180")},
+	{"$length",              4, __LOCALIZE("time length of the analyzed audio", "sws_DLG_180")},
+	{"$truepeakpos",         3, __LOCALIZE("true peak time position (counting from audio start)", "sws_DLG_180")},
+	{"$maxshortpos",         3, __LOCALIZE("time position of maximum short-term loudness (counting from audio start)", "sws_DLG_180")},
+	{"$maxmomentarypos",     2, __LOCALIZE("time position of maximum momentary loudness (counting from audio start)", "sws_DLG_180")},
+	{"$truepeakposproj",     2, __LOCALIZE("true peak project time position", "sws_DLG_180")},
+	{"$maxshortposproj",     2, __LOCALIZE("project time position of maximum short-term loudness", "sws_DLG_180")},
+	{"$maxmomentaryposproj", 1, __LOCALIZE("project time position of maximum momentary loudness", "sws_DLG_180")},
+	{"$lureference",         3, __LOCALIZE("0 LU reference value set in global preferences", "sws_DLG_180")},
+	{"$luformat",            4, __LOCALIZE("LU unit format set in global preferences", "sws_DLG_180")},
+	{"$t",                   5, __LOCALIZE("inserts tab character (displayed as normal space in preview)", "sws_DLG_180")},
+	{"$n",                   5, __LOCALIZE("inserts newline (displayed as normal space in preview)", "sws_DLG_180")},
+	{"$$",                   5, __LOCALIZE("inserts $ character (normal $ works too, this is to prevent wildcard from being treated as wildcard)", "sws_DLG_180")},
 	{NULL,                   0, NULL},
-	// !WANT_LOCALIZE_STRINGS_END
 };
 
 // !WANT_LOCALIZE_STRINGS_BEGIN:sws_DLG_174
@@ -107,11 +112,12 @@ static SWS_LVColumn g_cols[] =
 	{25,  0, "#"},
 	{110, 0, "Track"},
 	{110, 0, "Item" },
-	{70,  0, "Integrated" },
-	{70,  0, "Range" },
-	{70,  0, "True peak" },
-	{115, 0, "Maximum short-term" },
-	{115, 0, "Maximum momentary" },
+	{98,  0, "Dlg. Integrated" },
+	{98,  0, "Dlg. Range" },
+	{98,  0, "Dlg. True peak" },
+	{143, 0, "Dlg. Maximum short-term" },
+	{143, 0, "Dlg. Maximum momentary" },
+	{143, 0, "Dlg. Percentage" },
 };
 // !WANT_LOCALIZE_STRINGS_END
 
@@ -125,6 +131,7 @@ enum
 	COL_TRUEPEAK,
 	COL_SHORTTERM,
 	COL_MOMENTARY,
+	COL_DLGPERC,
 	COL_COUNT
 };
 
@@ -158,7 +165,6 @@ const int EXPORT_TO_FILE              = 0xF017;
 const int GO_TO_SHORTTERM             = 0xF018;
 const int GO_TO_MOMENTARY             = 0xF019;
 const int GO_TO_TRUE_PEAK             = 0xF01A;
-const int SET_DO_HIGH_PRECISION_MODE  = 0xF01B;
 
 const int ANALYZE_TIMER     = 1;
 const int REANALYZE_TIMER   = 2;
@@ -169,99 +175,112 @@ const int UPDATE_TIMER_FREQ  = 200;
 /******************************************************************************
 * Macros                                                                      *
 ******************************************************************************/
-#define g_pref BR_LoudnessPref::Get() // not exactly global object, but it behaves as such, heh...
+#define g_NFpref NF_LoudnessPref::Get() // not exactly global object, but it behaves as such, heh...
 
 /******************************************************************************
 * Globals                                                                     *
 ******************************************************************************/
-SNM_WindowManager<BR_AnalyzeLoudnessWnd>                              g_loudnessWndManager(LOUDNESS_WND);
-static SWSProjConfig<WDL_PtrList_DeleteOnDestroy<BR_LoudnessObject> > g_analyzedObjects; // no WDL_PtrList_DOD here (abort analysis)
-static HWND                                                           g_normalizeWnd = NULL;
+SNM_WindowManager<NF_AnalyzeLoudnessWnd>                              g_NFloudnessWndManager(LOUDNESS_WND);
+static SWSProjConfig<WDL_PtrList_DeleteOnDestroy<NF_LoudnessObject> > g_NFanalyzedObjects; // no WDL_PtrList_DOD here (abort analysis)
+static HWND                                                           g_NFnormalizeWnd = NULL;
+
+// Dialogue Intelligence library + functions pointers
+HINSTANCE hGetProcID_libdi;
+
+#ifdef _WIN32
+    typedef size_t(__stdcall *f_di_query_mem_size)(unsigned int sample_rate, unsigned int max_input_samples);
+    typedef int(__stdcall *f_di_init)(void *p_inst, size_t num_bytes, unsigned int sample_rate, unsigned int max_input_samples);
+    typedef int(__stdcall *f_di_process)(void *p_inst, float *p_samples, unsigned int num_samples);
+#else
+    typedef size_t(*f_di_query_mem_size)(unsigned int sample_rate, unsigned int max_input_samples);
+    typedef int(*f_di_init)(void *p_inst, size_t num_bytes, unsigned int sample_rate, unsigned int max_input_samples);
+    typedef int(*f_di_process)(void *p_inst, float *p_samples, unsigned int num_samples);
+#endif
+
+f_di_query_mem_size p_di_query_mem_size;
+f_di_init p_di_init;
+f_di_process p_di_process;
 
 /******************************************************************************
 * Loudness object                                                             *
 ******************************************************************************/
-BR_LoudnessObject::BR_LoudnessObject () :
-m_track               (NULL),
-m_take                (NULL),
-m_guid                (GUID_NULL),
-m_integrated          (NEGATIVE_INF),
-m_truePeak            (NEGATIVE_INF),
-m_truePeakPos         (-1),
-m_shortTermMax        (NEGATIVE_INF),
-m_momentaryMax        (NEGATIVE_INF),
-m_range               (0),
-m_progress            (0),
-m_running             (false),
-m_analyzed            (false),
-m_killFlag            (false),
-m_integratedOnly      (false),
-m_doTruePeak          (true),
-m_truePeakAnalyzed    (false),
-m_process             (NULL),
-m_doHighPrecisionMode (true)
+NF_LoudnessObject::NF_LoudnessObject () :
+m_track            (NULL),
+m_take             (NULL),
+m_guid             (GUID_NULL),
+m_integrated       (NEGATIVE_INF),
+m_truePeak         (NEGATIVE_INF),
+m_truePeakPos      (-1),
+m_shortTermMax     (NEGATIVE_INF),
+m_momentaryMax     (NEGATIVE_INF),
+m_range            (0),
+m_progress         (0),
+m_running          (false),
+m_analyzed         (false),
+m_killFlag         (false),
+m_integratedOnly   (false),
+m_doTruePeak       (true),
+m_truePeakAnalyzed (false),
+m_process          (NULL)
 {
 }
 
-BR_LoudnessObject::BR_LoudnessObject (MediaTrack* track) :
-m_track               (track),
-m_take                (NULL),
-m_guid                (*(GUID*)GetSetMediaTrackInfo(track, "GUID", NULL)),
-m_integrated          (NEGATIVE_INF),
-m_truePeak            (NEGATIVE_INF),
-m_truePeakPos         (-1),
-m_shortTermMax        (NEGATIVE_INF),
-m_momentaryMax        (NEGATIVE_INF),
-m_range               (0),
-m_progress            (0),
-m_running             (false),
-m_analyzed            (false),
-m_killFlag            (false),
-m_integratedOnly      (false),
-m_doTruePeak          (true),
-m_truePeakAnalyzed    (false),
-m_process             (NULL),
-m_doHighPrecisionMode (true)
+NF_LoudnessObject::NF_LoudnessObject (MediaTrack* track) :
+m_track            (track),
+m_take             (NULL),
+m_guid             (*(GUID*)GetSetMediaTrackInfo(track, "GUID", NULL)),
+m_integrated       (NEGATIVE_INF),
+m_truePeak         (NEGATIVE_INF),
+m_truePeakPos      (-1),
+m_shortTermMax     (NEGATIVE_INF),
+m_momentaryMax     (NEGATIVE_INF),
+m_range            (0),
+m_progress         (0),
+m_running          (false),
+m_analyzed         (false),
+m_killFlag         (false),
+m_integratedOnly   (false),
+m_doTruePeak       (true),
+m_truePeakAnalyzed (false),
+m_process          (NULL)
 {
 	this->CheckSetAudioData();
 }
 
-BR_LoudnessObject::BR_LoudnessObject (MediaItem_Take* take) :
-m_track               (NULL),
-m_take                (take),
-m_guid                (*(GUID*)GetSetMediaItemTakeInfo(take, "GUID", NULL)),
-m_integrated          (NEGATIVE_INF),
-m_truePeak            (NEGATIVE_INF),
-m_truePeakPos         (-1),
-m_shortTermMax        (NEGATIVE_INF),
-m_momentaryMax        (NEGATIVE_INF),
-m_range               (0),
-m_progress            (0),
-m_running             (false),
-m_analyzed            (false),
-m_killFlag            (false),
-m_integratedOnly      (false),
-m_doTruePeak          (true),
-m_truePeakAnalyzed    (false),
-m_process             (NULL),
-m_doHighPrecisionMode (true)
+NF_LoudnessObject::NF_LoudnessObject (MediaItem_Take* take) :
+m_track            (NULL),
+m_take             (take),
+m_guid             (*(GUID*)GetSetMediaItemTakeInfo(take, "GUID", NULL)),
+m_integrated       (NEGATIVE_INF),
+m_truePeak         (NEGATIVE_INF),
+m_truePeakPos      (-1),
+m_shortTermMax     (NEGATIVE_INF),
+m_momentaryMax     (NEGATIVE_INF),
+m_range            (0),
+m_progress         (0),
+m_running          (false),
+m_analyzed         (false),
+m_killFlag         (false),
+m_integratedOnly   (false),
+m_doTruePeak       (true),
+m_truePeakAnalyzed (false),
+m_process          (NULL)
 {
 	this->CheckSetAudioData();
 }
 
-BR_LoudnessObject::~BR_LoudnessObject ()
+NF_LoudnessObject::~NF_LoudnessObject ()
 {
 	this->AbortAnalyze();
 	if (EnumProjects(0, NULL, 0)) // prevent destroying accessor on reaper exit (otherwise we get access violation)
 		DestroyAudioAccessor(this->GetAudioData().audio);
 }
 
-bool BR_LoudnessObject::Analyze (bool integratedOnly, bool doTruePeak, bool doHighPrecisionMode)
+bool NF_LoudnessObject::Analyze (bool integratedOnly, bool doTruePeak)
 {
 	this->AbortAnalyze();
 	this->SetIntegratedOnly(integratedOnly);
 	this->SetDoTruePeak(doTruePeak);
-	this->SetDoHighPrecisionMode(doHighPrecisionMode);
 
 	// Is audio data still valid?
 	if (this->CheckSetAudioData())
@@ -288,7 +307,7 @@ bool BR_LoudnessObject::Analyze (bool integratedOnly, bool doTruePeak, bool doHi
 	}
 }
 
-void BR_LoudnessObject::AbortAnalyze ()
+void NF_LoudnessObject::AbortAnalyze ()
 {
 	if (this->GetProcess())
 	{
@@ -303,19 +322,19 @@ void BR_LoudnessObject::AbortAnalyze ()
 	}
 }
 
-bool BR_LoudnessObject::IsRunning ()
+bool NF_LoudnessObject::IsRunning ()
 {
 	SWS_SectionLock lock(&m_mutex);
 	return m_running;
 }
 
-double BR_LoudnessObject::GetProgress ()
+double NF_LoudnessObject::GetProgress ()
 {
 	SWS_SectionLock lock(&m_mutex);
 	return m_progress;
 }
 
-double BR_LoudnessObject::GetColumnVal (int column, int mode)
+double NF_LoudnessObject::GetColumnVal (int column, int mode)
 {
 	SWS_SectionLock lock(&m_mutex);
 
@@ -323,33 +342,40 @@ double BR_LoudnessObject::GetColumnVal (int column, int mode)
 	switch (column)
 	{
 		case COL_INTEGRATED:
-			this->GetAnalyzeData(&returnVal, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+			this->GetAnalyzeData(&returnVal, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 		break;
 
 		case COL_RANGE:
-			this->GetAnalyzeData(NULL, &returnVal, NULL, NULL, NULL, NULL, NULL, NULL);
+			this->GetAnalyzeData(NULL, &returnVal, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 		break;
 
 		case COL_TRUEPEAK:
-			this->GetAnalyzeData(NULL, NULL, &returnVal, NULL, NULL, NULL, NULL, NULL);
+			this->GetAnalyzeData(NULL, NULL, &returnVal, NULL, NULL, NULL, NULL, NULL, NULL);
 		break;
 
 		case COL_SHORTTERM:
-			this->GetAnalyzeData(NULL, NULL, NULL, NULL, &returnVal, NULL, NULL, NULL);
+			this->GetAnalyzeData(NULL, NULL, NULL, NULL, &returnVal, NULL, NULL, NULL, NULL);
 		break;
 
 		case COL_MOMENTARY:
-			this->GetAnalyzeData(NULL, NULL, NULL, NULL, NULL, &returnVal, NULL, NULL);
+			this->GetAnalyzeData(NULL, NULL, NULL, NULL, NULL, &returnVal, NULL, NULL, NULL);
 		break;
+
+		case COL_DLGPERC:
+			vector<int> v; 
+			this->GetAnalyzeData(NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &v);
+			returnVal = v[0]; // max. of all channels only for now
+		break;
+		
 	}
 
 	if (mode == 1 && column != COL_RANGE && column != COL_TRUEPEAK)
-		returnVal = g_pref.LUFStoLU(returnVal);
+		returnVal = g_NFpref.LUFStoLU(returnVal);
 
 	return RoundToN(returnVal, 1);
 }
 
-void BR_LoudnessObject::GetColumnStr (int column, char* str, int strSz, int mode)
+void NF_LoudnessObject::GetColumnStr (int column, char* str, int strSz, int mode)
 {
 	SWS_SectionLock lock(&m_mutex);
 
@@ -357,7 +383,7 @@ void BR_LoudnessObject::GetColumnStr (int column, char* str, int strSz, int mode
 	{
 		case COL_ID:
 		{
-			_snprintfSafe(str, strSz, "%d", g_analyzedObjects.Get()->Find(this) + 1);
+			_snprintfSafe(str, strSz, "%d", g_NFanalyzedObjects.Get()->Find(this) + 1);
 		}
 		break;
 
@@ -372,11 +398,10 @@ void BR_LoudnessObject::GetColumnStr (int column, char* str, int strSz, int mode
 			_snprintfSafe(str, strSz, "%s", (this->GetTakeName()).Get());
 		}
 		break;
-
 		case COL_RANGE:
 		{
 			double range;
-			this->GetAnalyzeData(NULL, &range, NULL, NULL, NULL, NULL, NULL, NULL);
+			this->GetAnalyzeData(NULL, &range, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 
 			if (range <= NEGATIVE_INF)
 				_snprintfSafe(str, strSz, "%s", __localizeFunc("-inf", "vol", 0));
@@ -388,7 +413,7 @@ void BR_LoudnessObject::GetColumnStr (int column, char* str, int strSz, int mode
 		case COL_TRUEPEAK:
 		{
 			double truePeak;
-			this->GetAnalyzeData(NULL, NULL, &truePeak, NULL, NULL, NULL, NULL, NULL);
+			this->GetAnalyzeData(NULL, NULL, &truePeak, NULL, NULL, NULL, NULL, NULL, NULL);
 
 			if (truePeak <= NEGATIVE_INF)
 				_snprintfSafe(str, strSz, "%s", __localizeFunc("-inf", "vol", 0));
@@ -402,23 +427,40 @@ void BR_LoudnessObject::GetColumnStr (int column, char* str, int strSz, int mode
 		case COL_MOMENTARY:
 		{
 			double value;
-			if      (column == COL_INTEGRATED) this->GetAnalyzeData(&value, NULL, NULL, NULL, NULL,   NULL,   NULL, NULL);
-			else if (column == COL_SHORTTERM)  this->GetAnalyzeData(NULL,   NULL, NULL, NULL, &value, NULL,   NULL, NULL);
-			else                               this->GetAnalyzeData(NULL,   NULL, NULL, NULL, NULL,   &value, NULL, NULL);
+			if      (column == COL_INTEGRATED) this->GetAnalyzeData(&value, NULL, NULL, NULL, NULL,   NULL,   NULL, NULL, NULL);
+			else if (column == COL_SHORTTERM)  this->GetAnalyzeData(NULL,   NULL, NULL, NULL, &value, NULL,   NULL, NULL, NULL);
+			else                               this->GetAnalyzeData(NULL,   NULL, NULL, NULL, NULL,   &value, NULL, NULL, NULL);
 
-			WDL_FastString unitLU = g_pref.GetFormatedLUString();
+			WDL_FastString unitLU = g_NFpref.GetFormatedLUString();
 			const char* unit = (mode == 1) ? unitLU.Get() : __LOCALIZE("LUFS", "sws_loudness");
 
 			if (value <= NEGATIVE_INF)
 				_snprintfSafe(str, strSz, "%s", __localizeFunc("-inf", "vol", 0));
 			else
-				_snprintfSafe(str, strSz, "%.1lf %s", RoundToN((mode == 1) ? g_pref.LUFStoLU(value) : value, 1), unit);
+				_snprintfSafe(str, strSz, "%.1lf %s", RoundToN((mode == 1) ? g_NFpref.LUFStoLU(value) : value, 1), unit);
+		}
+		break;
+
+		case COL_DLGPERC:
+		{
+			vector <int> dialoguePercentages;
+			this->GetAnalyzeData(NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &dialoguePercentages);
+			WDL_String fstr;
+			
+			for (int i = 0; i < dialoguePercentages.size(); ++i) {
+				if (i == 0)
+					fstr.AppendFormatted(50, __LOCALIZE_VERFMT("Max: %d %", "sws_loudness"), m_dialoguePercentages[i]);
+				else
+				fstr.AppendFormatted(50, __LOCALIZE_VERFMT("Channel %d: %d %", "sws_loudness"), i, m_dialoguePercentages[i]);
+			}
+			_snprintfSafe(str, strSz, fstr.Get());
+			
 		}
 		break;
 	}
 }
 
-void BR_LoudnessObject::SaveObject (ProjectStateContext* ctx)
+void NF_LoudnessObject::SaveObject (ProjectStateContext* ctx)
 {
 	if (this->CheckSetAudioData())
 	{
@@ -427,12 +469,13 @@ void BR_LoudnessObject::SaveObject (ProjectStateContext* ctx)
 
 		double integrated, range, truePeak, truePeakPos, shortTermMax, momentaryMax;
 		vector<double> shortTermValues, momentaryValues;
-		this->GetAnalyzeData(&integrated, &range, &truePeak, &truePeakPos, &shortTermMax, &momentaryMax, &shortTermValues, &momentaryValues);
+		vector<int> dialoguePercentages;
+		this->GetAnalyzeData(&integrated, &range, &truePeak, &truePeakPos, &shortTermMax, &momentaryMax, &shortTermValues, &momentaryValues, &dialoguePercentages);
 
 		ctx->AddLine(PROJ_OBJECT_KEY);
 		ctx->AddLine("%s %d %s", PROJ_OBJECT_KEY_TARGET, (this->GetTrack() ? 1 : 0), tmp);
 		ctx->AddLine("%s %lf %lf %lf %lf %lf %lf", PROJ_OBJECT_KEY_MEASUREMENTS, integrated, range, truePeak, truePeakPos, shortTermMax, momentaryMax);
-		ctx->AddLine("%s %d %d %d %d %d %d", PROJ_OBJECT_KEY_STATUS, this->GetDoTruePeak(), this->GetTruePeakAnalyzeStatus(), this->GetAnalyzedStatus(), this->GetIntegratedOnly(), VERSION, this->GetDoHighPrecisionMode());
+		ctx->AddLine("%s %d %d %d %d %d", PROJ_OBJECT_KEY_STATUS, this->GetDoTruePeak(), this->GetTruePeakAnalyzeStatus(), this->GetAnalyzedStatus(), this->GetIntegratedOnly(), VERSION);
 
 		int count = 0;
 		WDL_FastString string;
@@ -464,13 +507,28 @@ void BR_LoudnessObject::SaveObject (ProjectStateContext* ctx)
 				count = 0;
 			}
 		}
+
+		count = 0;
+		string.DeleteSub(0, string.GetLength());
+		for (size_t i = 0; i < dialoguePercentages.size(); ++i)
+		{
+			string.AppendFormatted(512, " %d", dialoguePercentages[i]);
+			++count;
+
+			if (count == 10 || i ==  dialoguePercentages.size() - 1)
+			{
+				ctx->AddLine("%s %s", PROJ_OBJECT_KEY_DLG_PERC, string.Get());
+				string.DeleteSub(0, string.GetLength());
+				count = 0;
+			}
+		}
 		ctx->AddLine(">");
 	}
 }
 
-bool BR_LoudnessObject::RestoreObject (ProjectStateContext* ctx)
+bool NF_LoudnessObject::RestoreObject (ProjectStateContext* ctx)
 {
-	bool doTruePeak = false, truePeakAnalyzed = false, analyzed = false, integratedOnly = false, doHighPrecision = false;
+	bool doTruePeak = false, truePeakAnalyzed = false, analyzed = false, integratedOnly = false;
 	int version = VERSION;
 
 	double integrated   = NEGATIVE_INF;
@@ -481,6 +539,7 @@ bool BR_LoudnessObject::RestoreObject (ProjectStateContext* ctx)
 	double momentaryMax = NEGATIVE_INF;
 	vector<double> shortTermValues;
 	vector<double> momentaryValues;
+	vector<int> dialoguePercentages;
 
 	char line[256];
 	LineParser lp(false);
@@ -513,7 +572,6 @@ bool BR_LoudnessObject::RestoreObject (ProjectStateContext* ctx)
 			analyzed         = !!lp.gettoken_int(3);
 			integratedOnly   = !!lp.gettoken_int(4);
 			version          = lp.gettoken_int(5);
-			doHighPrecision  = !!lp.gettoken_int(6);
 		}
 		else if (!strcmp(lp.gettoken_str(0), PROJ_OBJECT_KEY_SHORT_TERM))
 		{
@@ -541,8 +599,15 @@ bool BR_LoudnessObject::RestoreObject (ProjectStateContext* ctx)
 			if (lp.getnumtokens() > 9)  momentaryValues.push_back(lp.gettoken_float(9));
 			if (lp.getnumtokens() > 10) momentaryValues.push_back(lp.gettoken_float(10));
 		}
+		else if (!strcmp(lp.gettoken_str(0), PROJ_OBJECT_KEY_DLG_PERC))
+		{
+			if (lp.getnumtokens() > 1) dialoguePercentages.push_back(lp.gettoken_int(1));
+			if (lp.getnumtokens() > 2) dialoguePercentages.push_back(lp.gettoken_int(2));
+			if (lp.getnumtokens() > 3) dialoguePercentages.push_back(lp.gettoken_int(3));
+			if (lp.getnumtokens() > 4) dialoguePercentages.push_back(lp.gettoken_int(4));
+		}
 	}
-	this->SetAnalyzeData(integrated, range, truePeak, truePeakPos, shortTermMax, momentaryMax, shortTermValues, momentaryValues);
+	this->SetAnalyzeData(integrated, range, truePeak, truePeakPos, shortTermMax, momentaryMax, shortTermValues, momentaryValues, dialoguePercentages);
 
 	if (this->IsTargetValid())
 	{
@@ -552,7 +617,6 @@ bool BR_LoudnessObject::RestoreObject (ProjectStateContext* ctx)
 		this->SetTruePeakAnalyzed(truePeakAnalyzed);
 		this->SetAnalyzedStatus(((version == VERSION) ? analyzed : false));
 		this->SetIntegratedOnly(integratedOnly);
-		this->SetDoHighPrecisionMode(doHighPrecision);
 
 		return true;
 	}
@@ -562,7 +626,7 @@ bool BR_LoudnessObject::RestoreObject (ProjectStateContext* ctx)
 	}
 }
 
-double BR_LoudnessObject::GetAudioLength ()
+double NF_LoudnessObject::GetAudioLength ()
 {
 	SWS_SectionLock lock(&m_mutex);
 	if (!this->IsTargetValid())
@@ -571,7 +635,7 @@ double BR_LoudnessObject::GetAudioLength ()
 	return this->GetAudioData().audioEnd - this->GetAudioData().audioStart;
 }
 
-double BR_LoudnessObject::GetAudioStart ()
+double NF_LoudnessObject::GetAudioStart ()
 {
 	SWS_SectionLock lock(&m_mutex);
 	if (!this->IsTargetValid())
@@ -584,7 +648,7 @@ double BR_LoudnessObject::GetAudioStart ()
 		return GetMediaItemInfo_Value(this->GetItem(), "D_POSITION") + start;
 }
 
-double BR_LoudnessObject::GetAudioEnd ()
+double NF_LoudnessObject::GetAudioEnd ()
 {
 	SWS_SectionLock lock(&m_mutex);
 	if (!this->IsTargetValid())
@@ -597,7 +661,7 @@ double BR_LoudnessObject::GetAudioEnd ()
 		return GetMediaItemInfo_Value(this->GetItem(), "D_POSITION") + end;
 }
 
-double BR_LoudnessObject::GetMaxMomentaryPos (bool projectTime)
+double NF_LoudnessObject::GetMaxMomentaryPos (bool projectTime)
 {
 	SWS_SectionLock lock(&m_mutex);
 	if (!this->IsTargetValid())
@@ -609,7 +673,7 @@ double BR_LoudnessObject::GetMaxMomentaryPos (bool projectTime)
 
 	vector<double> momentaryValues;
 	double momentaryMax;
-	this->GetAnalyzeData(NULL, NULL, NULL, NULL, NULL, &momentaryMax, NULL, &momentaryValues);
+	this->GetAnalyzeData(NULL, NULL, NULL, NULL, NULL, &momentaryMax, NULL, &momentaryValues, NULL);
 	for (size_t i = 0; i < momentaryValues.size(); ++i)
 	{
 		if (momentaryValues[i] == momentaryMax)
@@ -618,10 +682,10 @@ double BR_LoudnessObject::GetMaxMomentaryPos (bool projectTime)
 			position += 0.4;
 	}
 
-	return position;
+	return position - 2.048; // acount for DI latency
 }
 
-double BR_LoudnessObject::GetMaxShorttermPos (bool projectTime)
+double NF_LoudnessObject::GetMaxShorttermPos (bool projectTime)
 {
 	SWS_SectionLock lock(&m_mutex);
 	if (!this->IsTargetValid())
@@ -633,7 +697,7 @@ double BR_LoudnessObject::GetMaxShorttermPos (bool projectTime)
 
 	vector<double> shortTermValues;
 	double shortTermMax;
-	this->GetAnalyzeData(NULL, NULL, NULL, NULL, &shortTermMax, NULL, &shortTermValues, NULL);
+	this->GetAnalyzeData(NULL, NULL, NULL, NULL, &shortTermMax, NULL, &shortTermValues, NULL, NULL);
 	for (size_t i = 0; i < shortTermValues.size(); ++i)
 	{
 		if (shortTermValues[i] == shortTermMax)
@@ -645,14 +709,14 @@ double BR_LoudnessObject::GetMaxShorttermPos (bool projectTime)
 	return position;
 }
 
-double BR_LoudnessObject::GetTruePeakPos (bool projectTime)
+double NF_LoudnessObject::GetTruePeakPos (bool projectTime)
 {
 	SWS_SectionLock lock(&m_mutex);
 	if (!this->IsTargetValid())
 		return -1;
 
 	double position;
-	this->GetAnalyzeData(NULL, NULL, NULL, &position, NULL, NULL, NULL, NULL);
+	this->GetAnalyzeData(NULL, NULL, NULL, &position, NULL, NULL, NULL, NULL, NULL);
 
 	if (position >= 0)
 	{
@@ -665,14 +729,14 @@ double BR_LoudnessObject::GetTruePeakPos (bool projectTime)
 	return position;
 }
 
-bool BR_LoudnessObject::IsTrack ()
+bool NF_LoudnessObject::IsTrack ()
 {
 	SWS_SectionLock lock(&m_mutex);
 	if (this->GetTrack()) return true;
 	else                  return false;
 }
 
-bool BR_LoudnessObject::IsTargetValid ()
+bool NF_LoudnessObject::IsTargetValid ()
 {
 	SWS_SectionLock lock(&m_mutex);
 
@@ -694,7 +758,7 @@ bool BR_LoudnessObject::IsTargetValid ()
 		}
 	}
 	else
-	{	
+	{
 		if (ValidatePtr(this->GetTake(), "MediaItem_Take*") && GuidsEqual(&guid, (GUID*)GetSetMediaItemTakeInfo(this->GetTake(), "GUID", NULL)))
 		{
 			// NF: prevent items going offline during analysis
@@ -727,7 +791,7 @@ bool BR_LoudnessObject::IsTargetValid ()
 	return false;
 }
 
-bool BR_LoudnessObject::CheckTarget (MediaTrack* track)
+bool NF_LoudnessObject::CheckTarget (MediaTrack* track)
 {
 	SWS_SectionLock lock(&m_mutex);
 	if (this->IsTargetValid() && this->GetTrack() && this->GetTrack() == track)
@@ -736,7 +800,7 @@ bool BR_LoudnessObject::CheckTarget (MediaTrack* track)
 		return false;
 }
 
-bool BR_LoudnessObject::CheckTarget (MediaItem_Take* take)
+bool NF_LoudnessObject::CheckTarget (MediaItem_Take* take)
 {
 	SWS_SectionLock lock(&m_mutex);
 	if (this->IsTargetValid() && this->GetTake() && this->GetTake() == take)
@@ -745,7 +809,7 @@ bool BR_LoudnessObject::CheckTarget (MediaItem_Take* take)
 		return false;
 }
 
-bool BR_LoudnessObject::IsSelectedInProject ()
+bool NF_LoudnessObject::IsSelectedInProject ()
 {
 	SWS_SectionLock lock(&m_mutex);
 	if (!this->IsTargetValid())
@@ -757,7 +821,7 @@ bool BR_LoudnessObject::IsSelectedInProject ()
 		return *(bool*)GetSetMediaItemInfo(this->GetItem(), "B_UISEL", NULL);
 }
 
-bool BR_LoudnessObject::CreateGraph (BR_Envelope& envelope, double minLUFS, double maxLUFS, bool momentary, HWND warningHwnd /*=g_hwndParent*/)
+bool NF_LoudnessObject::CreateGraph (BR_Envelope& envelope, double minLUFS, double maxLUFS, bool momentary, HWND warningHwnd /*=g_hwndParent*/)
 {
 	SWS_SectionLock lock(&m_mutex);
 	if (!this->IsTargetValid() || envelope.IsTempo())
@@ -772,7 +836,7 @@ bool BR_LoudnessObject::CreateGraph (BR_Envelope& envelope, double minLUFS, doub
 	double end   = this->GetAudioEnd();
 
 	vector<double> values;
-	this->GetAnalyzeData(NULL, NULL, NULL, NULL, NULL, NULL, ((momentary) ? NULL : &values), ((momentary) ? &values : NULL));
+	this->GetAnalyzeData(NULL, NULL, NULL, NULL, NULL, NULL, ((momentary) ? NULL : &values), ((momentary) ? &values : NULL), NULL);
 	envelope.DeletePointsInRange(start, end);
 
 	double position = start;
@@ -825,14 +889,14 @@ bool BR_LoudnessObject::CreateGraph (BR_Envelope& envelope, double minLUFS, doub
 	return true;
 }
 
-bool BR_LoudnessObject::NormalizeIntegrated (double targetLUFS)
+bool NF_LoudnessObject::NormalizeIntegrated (double targetLUFS)
 {
 	SWS_SectionLock lock(&m_mutex);
 	if (!this->IsTargetValid())
 		return false;
 
 	double integrated;
-	this->GetAnalyzeData(&integrated, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+	this->GetAnalyzeData(&integrated, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 
 	bool update = false;
 	if (integrated > NEGATIVE_INF)
@@ -861,7 +925,7 @@ bool BR_LoudnessObject::NormalizeIntegrated (double targetLUFS)
 	return update;
 }
 
-void BR_LoudnessObject::SetSelectedInProject (bool selected)
+void NF_LoudnessObject::SetSelectedInProject (bool selected)
 {
 	SWS_SectionLock lock(&m_mutex);
 	if (!this->IsTargetValid())
@@ -880,7 +944,7 @@ void BR_LoudnessObject::SetSelectedInProject (bool selected)
 	}
 }
 
-void BR_LoudnessObject::GoToTarget ()
+void NF_LoudnessObject::GoToTarget ()
 {
 	SWS_SectionLock lock(&m_mutex);
 	if (!this->IsTargetValid())
@@ -897,7 +961,7 @@ void BR_LoudnessObject::GoToTarget ()
 	ScrollToTrackIfNotInArrange(track);
 }
 
-void BR_LoudnessObject::GoToMomentaryMax (bool timeSelection)
+void NF_LoudnessObject::GoToMomentaryMax (bool timeSelection)
 {
 	SWS_SectionLock lock(&m_mutex);
 	if (!this->IsTargetValid())
@@ -917,7 +981,7 @@ void BR_LoudnessObject::GoToMomentaryMax (bool timeSelection)
 	PreventUIRefresh(-1);
 }
 
-void BR_LoudnessObject::GoToShortTermMax (bool timeSelection)
+void NF_LoudnessObject::GoToShortTermMax (bool timeSelection)
 {
 	SWS_SectionLock lock(&m_mutex);
 	if (!this->IsTargetValid())
@@ -938,7 +1002,7 @@ void BR_LoudnessObject::GoToShortTermMax (bool timeSelection)
 	PreventUIRefresh(-1);
 }
 
-void BR_LoudnessObject::GoToTruePeak ()
+void NF_LoudnessObject::GoToTruePeak ()
 {
 	SWS_SectionLock lock(&m_mutex);
 	if (!this->IsTargetValid())
@@ -954,7 +1018,7 @@ void BR_LoudnessObject::GoToTruePeak ()
 	}
 }
 
-int BR_LoudnessObject::GetTrackNumber ()
+int NF_LoudnessObject::GetTrackNumber ()
 {
 	SWS_SectionLock lock(&m_mutex);
 	if (!this->IsTargetValid())
@@ -965,7 +1029,7 @@ int BR_LoudnessObject::GetTrackNumber ()
 	return id;
 }
 
-int BR_LoudnessObject::GetItemNumber ()
+int NF_LoudnessObject::GetItemNumber ()
 {
 	SWS_SectionLock lock(&m_mutex);
 	if (!this->IsTargetValid())
@@ -977,7 +1041,7 @@ int BR_LoudnessObject::GetItemNumber ()
 		return -1;
 }
 
-unsigned WINAPI BR_LoudnessObject::AnalyzeData (void* loudnessObject)
+unsigned WINAPI NF_LoudnessObject::AnalyzeData (void* loudnessObject)
 {
 	// Analyze results that get saved at the end
 	double integrated   = NEGATIVE_INF;
@@ -990,33 +1054,52 @@ unsigned WINAPI BR_LoudnessObject::AnalyzeData (void* loudnessObject)
 	vector<double> shortTermValues;
 
 	// Get take/track info
-	BR_LoudnessObject* _this = (BR_LoudnessObject*)loudnessObject;
-	BR_LoudnessObject::AudioData data = _this->GetAudioData();
+	NF_LoudnessObject* _this = (NF_LoudnessObject*)loudnessObject;
+	NF_LoudnessObject::AudioData data = _this->GetAudioData();
 
 	bool doPan               = (data.channels > 1              && data.pan != 0)               ? (true) : (false); // tracks will always get false here (see CheckSetAudioData())
 	bool doVolEnv            = (data.volEnv.CountPoints()      && data.volEnv.IsActive())      ? (true) : (false);
 	bool doVolPreFXEnv       = (data.volEnvPreFX.CountPoints() && data.volEnvPreFX.IsActive()) ? (true) : (false);
 	bool integratedOnly      = _this->GetIntegratedOnly();
 	bool doTruePeak          = _this->GetDoTruePeak();
-	bool doHighPrecisionMode = _this->GetDoHighPrecisionMode();
-
-	/*
-	NF: fix for wrong results when analyzing item, item is not at pos 0.0 and contains take vol. env.
-	https://github.com/reaper-oss/sws/issues/957#issuecomment-371233030
-	TakeAudioAccesor, unlike TrackAudioAccessor returns relative start/end times
-	https://forum.cockos.com/showthread.php?t=204397
-	so in the correction for take volume env. we must add item pos. to get correct env. evaluation
-	*/
 	double itemPos = 0.0;
-	if (_this->m_take)
+	if (_this->m_take) // fix https://github.com/reaper-oss/sws/issues/957#issuecomment-371233030
 		itemPos = GetMediaItemInfo_Value(_this->GetItem(), "D_POSITION");
-
-	// Prepare ebur123_state
+	
+	// Prepare ebur128_state
 	ebur128_state* loudnessState = NULL;
+
 	int mode = (integratedOnly) ? EBUR128_MODE_I : EBUR128_MODE_M | EBUR128_MODE_S | EBUR128_MODE_I | EBUR128_MODE_LRA;
 	if (!integratedOnly && doTruePeak)
 		mode |= EBUR128_MODE_TRUE_PEAK;
 	loudnessState = ebur128_init((size_t)data.channels, (size_t)data.samplerate, mode);
+
+	//////////////////////////////////
+	// Dialogue Intelligence ('DI') //
+	//////////////////////////////////
+	bool doDI = true; // always true currently, could be used to dynamically apply speech or Loudness gating later on
+	int DIinstancesToAllocate = 0; // takes channel mode into account
+	int DIinstancesCount = 0; // actually allocated DI instances
+	WDL_PtrList_DeleteOnDestroy<DI> DIinstances; // pointers to DI instances
+	vector<vector<float> > tempFloatBufs; // single channels (deinterleaved) float samples for feeding DI instances
+	vector<int> DIoutputs; // DI output per channel; -1: invalid ouput (buffering), 1: speech, 0: other
+
+	/*
+	Because of the DI processing latency (2048 ms) we use
+	an undelayed buffer which is feed to the DI instance(s) for speech detection
+	and a 2048 ms 'early' (negative delayed) buffer on which DI results are applied (gate if non-speech),
+	volume and pan/volume envelopes are corrected for (if speech detected)  and then is fed to ebur128
+	*/
+	const double bufOFFSET = 2.048;
+
+	// In this last 2048 ms the DI buffer is flushed and the last audio data is processed
+	data.audioEnd += bufOFFSET;
+
+	// for calculating detected speech amount (in %)
+	int processedBlocks = 0; // how many audio blocks were process by DI
+	vector<int> isSpeechCounts;  // how many blocks are detected as speech per channel
+	vector<int> dialoguePercentages; // percentages speech vs. non speech blocks per channel, gets written to results
+	
 
 	// Ignore channels according to channel mode. Note: we can't partially request samples, i.e. channel mode is mono, but take is stereo...asking for
 	// 1 channel only won't work. We must always request the real channel count even though reaper interleaves active channels starting from 0
@@ -1028,6 +1111,8 @@ unsigned WINAPI BR_LoudnessObject::AnalyzeData (void* loudnessObject)
 			ebur128_set_channel(loudnessState, 0, EBUR128_LEFT);
 			for (int i = 1; i <= data.channels; ++i)
 				ebur128_set_channel(loudnessState, i, EBUR128_UNUSED);
+
+			DIinstancesToAllocate = 1;
 		}
 		// Stereo channel modes
 		else
@@ -1036,102 +1121,215 @@ unsigned WINAPI BR_LoudnessObject::AnalyzeData (void* loudnessObject)
 			ebur128_set_channel(loudnessState, 1, EBUR128_RIGHT);
 			for (int i = 2; i <= data.channels; ++i)
 				ebur128_set_channel(loudnessState, i, EBUR128_UNUSED);
+
+			DIinstancesToAllocate = 2;
 		}
 	}
 	else
 	{
+		// Dialogue loudness only measures (up to) first three channels
 		ebur128_set_channel(loudnessState, 0, EBUR128_LEFT);
 		ebur128_set_channel(loudnessState, 1, EBUR128_RIGHT);
 		ebur128_set_channel(loudnessState, 2, EBUR128_CENTER);
-		ebur128_set_channel(loudnessState, 3, EBUR128_LEFT_SURROUND);
-		ebur128_set_channel(loudnessState, 4, EBUR128_RIGHT_SURROUND);
+	
+		for (int i = 4; i <= data.channels; ++i)
+			ebur128_set_channel(loudnessState, i, EBUR128_UNUSED);
+		
+		DIinstancesToAllocate = (data.channels <= 3 ? data.channels : 3);
 	}
 
 	// This lets us get integrated reading even if the target is too short
 	bool doShortTerm = true;
 	bool doMomentary = true;
-	bool newAudioEndSet = false;  bool correctForVolAndPanVolEnvs = true; // #1074
 	double effectiveEndTime = data.audioEnd;
 	if (data.audioEnd - data.audioStart < 3)
 	{
 		doShortTerm = false; // doMomentary is set during calculation
 		data.audioEnd = data.audioStart + 3;
-		newAudioEndSet = true;
 	}
 
 	// Fill loudnessState with samples and get momentary/short-term measurements
-	int refreshRateinHz = 5; // NF: orig. mode, 5 Hz refresh rate / 200 ms buffer
-	if (!integratedOnly && doHighPrecisionMode)
-		refreshRateinHz = 100; // NF: high precision mode, 100 Hz refresh rate / 10 ms buffer
-
-	int sampleCount = data.samplerate/refreshRateinHz;
+	int sampleCount = data.samplerate / 5;
 	int bufSz = sampleCount * data.channels;
 	int processedSamples = 0;
-	double sampleTimeLen = 1.0 / data.samplerate; // NF fix: 1 / data.samplerate (int / int) always resulted in 0.0
+	const double sampleTimeLen = 1.0 / data.samplerate;
 	double currentTime   = data.audioStart;
 	int i = 0;
 	int momentaryFilled = 1;
+
+	// Prepare + init DI instances
+	// DI doc recommends separate DI instances per chan. Maximum of three DI instances, for chan's usually containing speech (l, r, center)
+	if (doDI) 
+	{
+		size_t num_bytes = (*p_di_query_mem_size)(data.samplerate, sampleCount);
+
+		for (int i = 0; i < DIinstancesToAllocate; ++i) {
+			// void* di = (void *)malloc(num_bytes);
+			char* di = new (nothrow) char [num_bytes]; // C++ version 
+			if (!di) {
+				MessageBox(GetMainHwnd(), __LOCALIZE("Couldn't allocate enough memory.", "sws_mbox"), __LOCALIZE("Dialogue loudness - Error", "sws_mbox"), MB_OK);
+				return -1;
+			}
+
+			if ((*p_di_init)(di, num_bytes, data.samplerate, sampleCount) < 0) { // init failed
+				// free(di);
+				delete[] di; // C++ version
+				di = NULL;
+			}
+			else { // init succesful
+				DIinstances.Add((DI*)di);
+				++DIinstancesCount;
+			}
+		}
+
+		// init single channel (deinterleaved) float samples vectors for feeding DI instances
+		for (int j = 0; j < DIinstancesCount; j++)
+		{
+			vector<float> vf;
+			tempFloatBufs.push_back(vf); 
+		}
+
+		// init other vectors used for analyzing
+		DIoutputs.resize(DIinstancesCount);
+		isSpeechCounts.resize(DIinstancesCount);
+		dialoguePercentages.resize(DIinstancesCount+1); // [0]: maximum of all channels
+	}
+
+	/*
+	DI produces invalid output (-1) while it's buffering (the first 2048 ms) 
+	so fill it with zeroes until it produces the first valid output
+	somehow this seems to produce better (i.e. more close to LM-Correct) results
+	than the (I think) actually technical correct implementation to check if it's buffering (see below)
+	not sure why
+	*/
+	float* tempZeroedFloatBuf = new float[sampleCount](); // value initialization
+	for (int j = 0; j < DIinstancesCount; ++j)
+	{
+		while ((*p_di_process)(DIinstances.Get(j), tempZeroedFloatBuf, sampleCount) == -1) {}
+	}
+	delete[] tempZeroedFloatBuf;
+
+
 	while (currentTime < data.audioEnd && !_this->GetKillFlag())
 	{
 		// Make sure we always fill our buffer exactly to audio end (and skip momentary/short-term intervals if not enough new samples)
 		bool skipIntervals = false;
-		if (data.audioEnd - currentTime < (doHighPrecisionMode ? 0.01 : 0.2) + numeric_limits<double>::epsilon())
+		if (data.audioEnd - currentTime < 0.2 + numeric_limits<double>::epsilon())
 		{
 			sampleCount = (int)(data.samplerate * (data.audioEnd - currentTime));
 			bufSz = sampleCount * data.channels;
 			skipIntervals = true;
 		}
 
-		// Get new 200 ms (10 ms in high precision mode) of samples
-		double* buf = new double[bufSz];
-		GetAudioAccessorSamples(data.audio, data.samplerate, data.channels, currentTime, sampleCount, buf);
+		// Get new 200 ms of samples
+		double* negativeDelayedBuf = new double[bufSz];
+		double* undelayedBuf = new double[bufSz];
+		GetAudioAccessorSamples(data.audio, data.samplerate, data.channels, currentTime - bufOFFSET, sampleCount, negativeDelayedBuf);
+		GetAudioAccessorSamples(data.audio, data.samplerate, data.channels, currentTime, sampleCount, undelayedBuf);
 
-		if (correctForVolAndPanVolEnvs)
+		if (doDI)
 		{
-			// NF: #1074 If data.audioEnd got expanded for short items to get integrated reading (see above)
-			// make sure we apply volume and pan/volume envelopes correction only to actual audio data
-			int nrSamplesToCorrect = bufSz;
-
-			// samples in buffer crossed actual audio end (effectiveEndTime)?
-			if (newAudioEndSet && effectiveEndTime - currentTime < 0.2 + numeric_limits<double>::epsilon()) 
-			{
-				nrSamplesToCorrect = (int)(data.samplerate * (effectiveEndTime - currentTime));
-				correctForVolAndPanVolEnvs = false;
+			// clear vectors
+			for (int k = 0; k < DIinstancesCount; ++k) {
+				tempFloatBufs[k].clear(); 
+				tempFloatBufs[k].reserve(sampleCount);
 			}
+		}
+
+		// DI wants buf of single channel floats
+		//  so deinterleave audio data in undelayed interleaved buf we got from AudioAccessor for feeding DI instance(s)
+		int currentChannel = 1;
 		
-			// Correct for volume and pan/volume envelopes
-			int currentChannel = 1;
-			double sampleTime = currentTime;
-
-			for (int j = 0; j < nrSamplesToCorrect; ++j)
+		if (doDI)
+		{
+			for (int j = 0; j < bufSz; ++j)
 			{
-				double adjust = 1;
+				if (currentChannel <= DIinstancesCount) 
+				{
+					tempFloatBufs[currentChannel - 1].push_back((float)undelayedBuf[j]);
+				}
 
-				// Volume envelopes
-				if (doVolPreFXEnv) adjust *= data.volEnvPreFX.ValueAtPosition(sampleTime, true);
+				if (++currentChannel > data.channels)
+					currentChannel = 1;
+			}
+		}
+
+		// process DI, feed the deinterleaved float bufs
+		if (doDI)
+		{
+			for (int i = 0; i < DIinstancesCount; ++i) 
+			{
+				// we can pass (adress of) vector to DI since std::vector has guaranteed contiguous buffer
+				DIoutputs[i] = (*p_di_process)(DIinstances.Get(i), &tempFloatBufs[i][0], sampleCount); 
+
+				if (DIoutputs[i] == 1)
+					isSpeechCounts[i] += 1;
+			}
+		}
+
+		/*
+		// check if DI is buffering
+		// not used currently as we filled it with zeroes already (see above)
+		// so it produces valid output (0 or 1) immediately
+		if (doDI)
+		{
+			if (DIoutputs[0] == -1)
+			{
+				delete[] negativeDelayedBuf; delete[] undelayedBuf;
+
+				processedSamples += sampleCount;
+				currentTime = data.audioStart + ((double)processedSamples / (double)data.samplerate);
+
+				_this->SetProgress((currentTime - data.audioStart) / (data.audioEnd - data.audioStart) * 0.95);
+				continue; // get next audio block and don't feed to ebur128
+			}
+		}
+		*/
+
+		// apply DI results to neg. delayed buf, write silence if non-speech detected
+		// if speech detected correct for volume and pan/volume envelopes
+		// and finally feed to ebur128
+		if (doDI)
+		{
+			currentChannel = 1;
+			double sampleTime = currentTime - bufOFFSET;
+
+			for (int j = 0; j < bufSz; ++j)
+			{
 				
-				if (doVolEnv) 
+				if (currentChannel <= DIinstancesCount) // need to process only channels with DI instances, others are ignored by ebur128
 				{
-					if (_this->m_track)
-						adjust *= data.volEnv.ValueAtPosition(sampleTime, true);
-					else
-						adjust *= data.volEnv.ValueAtPosition(sampleTime + itemPos, true);
+					if (DIoutputs[currentChannel - 1] == 0 ) // non-speech, gate
+						negativeDelayedBuf[j] = 0.0;
+					else if (DIoutputs[currentChannel - 1] == 1) // speech detected, correct for volume and pan/volume envelopes
+					{
+						double adjust = 1;
+
+						// Volume envelopes
+						if (doVolPreFXEnv) adjust *= data.volEnvPreFX.ValueAtPosition(sampleTime, true);
+						if (doVolEnv) {
+							if (_this->m_track)
+								adjust *= data.volEnv.ValueAtPosition(sampleTime, true);
+							else
+								adjust *= data.volEnv.ValueAtPosition(sampleTime + itemPos, true);
+						}
+
+						// Volume fader
+						adjust *= data.volume;
+
+						// Pan fader (takes only)
+						if (doPan)
+						{
+							if (data.pan > 0 && (currentChannel % 2 == 1))
+								adjust *= 1 - data.pan;                         // takes have no pan law!
+							else if (data.pan < 0 && (currentChannel % 2 == 0))
+								adjust *= 1 + data.pan;
+						}
+
+						negativeDelayedBuf[j] *= adjust;
+					}
 				}
-
-				// Volume fader
-				adjust *= data.volume;
-
-				// Pan fader (takes only)
-				if (doPan)
-				{
-					if (data.pan > 0 && (currentChannel % 2 == 1))
-						adjust *= 1 - data.pan;                         // takes have no pan law!
-					else if (data.pan < 0 && (currentChannel % 2 == 0))
-						adjust *= 1 + data.pan;
-				}
-
-				buf[j] *= adjust;
-
+				
 				if (++currentChannel > data.channels)
 					currentChannel = 1;
 
@@ -1141,8 +1339,8 @@ unsigned WINAPI BR_LoudnessObject::AnalyzeData (void* loudnessObject)
 			}
 		}
 
-		ebur128_add_frames_double(loudnessState, buf, sampleCount);
-		delete[] buf;
+		ebur128_add_frames_double(loudnessState, negativeDelayedBuf, sampleCount);
+		delete[] negativeDelayedBuf; delete[] undelayedBuf;
 
 		if (!integratedOnly && !skipIntervals)
 		{
@@ -1181,6 +1379,10 @@ unsigned WINAPI BR_LoudnessObject::AnalyzeData (void* loudnessObject)
 		processedSamples += sampleCount;
 		currentTime = data.audioStart + ((double)processedSamples / (double)data.samplerate);
 
+		// only increase block count if DI processes valid audio data (and isn't still buffering)
+		if (currentTime > bufOFFSET)
+			processedBlocks += 1;
+
 		_this->SetProgress ((currentTime - data.audioStart) / (data.audioEnd - data.audioStart) * 0.95); // loudness_global and loudness_range seem rather fast and since we currently
 		if (++i == 15)                                                                                   // can't monitor their progress, leave last 10% of progress for them
 		{
@@ -1196,10 +1398,12 @@ unsigned WINAPI BR_LoudnessObject::AnalyzeData (void* loudnessObject)
 	// Get integrated and loudness range
 	if (!_this->GetKillFlag())
 	{
-		ebur128_loudness_global(loudnessState, &integrated, true);
+		ebur128_loudness_global(loudnessState, &integrated, false);
 		if (!integratedOnly)
 		{
-			ebur128_loudness_range(loudnessState, &range, true);
+			// not sure how Loudness range is measured with Dialogue gating, see my comments in ebur128.h
+			ebur128_loudness_range(loudnessState, &range, false);
+
 			if (doTruePeak)
 			{
 				for (int i = 0; i < data.channels; ++i)
@@ -1220,10 +1424,23 @@ unsigned WINAPI BR_LoudnessObject::AnalyzeData (void* loudnessObject)
 	}
 	ebur128_destroy(&loudnessState);
 
+	// calc. dialogue / non-dialogue % per channel
+	if (doDI)
+	{
+		int dialoguePercentageMax = 0;
+
+		for (int i = 1; i <= DIinstancesCount; i++) {
+			dialoguePercentages[i] = isSpeechCounts[i-1] * 100 / processedBlocks;
+			if (dialoguePercentages[i] > dialoguePercentageMax)
+				dialoguePercentageMax = dialoguePercentages[i];
+		}
+		dialoguePercentages[0] = dialoguePercentageMax;
+	}
+
 	// Write analyze data
 	if (!_this->GetKillFlag())
 	{
-		_this->SetAnalyzeData(integrated, range, truePeak, truePeakPos, shortTermMax, momentaryMax, shortTermValues, momentaryValues);
+		_this->SetAnalyzeData(integrated, range, truePeak, truePeakPos, shortTermMax, momentaryMax, shortTermValues, momentaryValues, dialoguePercentages);
 		_this->SetProgress(1);
 		_this->SetRunning(false);
 		if (!integratedOnly)
@@ -1233,13 +1450,13 @@ unsigned WINAPI BR_LoudnessObject::AnalyzeData (void* loudnessObject)
 	return 0;
 }
 
-int BR_LoudnessObject::CheckSetAudioData ()
+int NF_LoudnessObject::CheckSetAudioData ()
 {
 	SWS_SectionLock lock(&m_mutex);
 	if (!this->IsTargetValid())
 		return 0;
 
-	BR_LoudnessObject::AudioData audioData = this->GetAudioData();
+	NF_LoudnessObject::AudioData audioData = this->GetAudioData();
 
 	char newHash[128]; memset(newHash, 0, 128);
 	GetAudioAccessorHash(audioData.audio, newHash);
@@ -1305,141 +1522,131 @@ int BR_LoudnessObject::CheckSetAudioData ()
 		return 1;
 }
 
-void BR_LoudnessObject::SetAudioData (const BR_LoudnessObject::AudioData& audioData)
+void NF_LoudnessObject::SetAudioData (const NF_LoudnessObject::AudioData& audioData)
 {
 	SWS_SectionLock lock(&m_mutex);
 	m_audioData = audioData;
 }
 
-BR_LoudnessObject::AudioData BR_LoudnessObject::GetAudioData ()
+NF_LoudnessObject::AudioData NF_LoudnessObject::GetAudioData ()
 {
 	SWS_SectionLock lock(&m_mutex);
 	return m_audioData;
 }
 
-void BR_LoudnessObject::SetRunning (bool running)
+void NF_LoudnessObject::SetRunning (bool running)
 {
 	SWS_SectionLock lock(&m_mutex);
 	m_running = running;
 }
 
-void BR_LoudnessObject::SetProgress (double progress)
+void NF_LoudnessObject::SetProgress (double progress)
 {
 	SWS_SectionLock lock(&m_mutex);
 	m_progress = progress;
 }
 
-void BR_LoudnessObject::SetAnalyzeData (double integrated, double range, double truePeak, double truePeakPos, double shortTermMax, double momentaryMax, const vector<double>& shortTermValues, const vector<double>& momentaryValues)
+void NF_LoudnessObject::SetAnalyzeData (double integrated, double range, double truePeak, double truePeakPos, double shortTermMax, double momentaryMax, const vector<double>& shortTermValues, const vector<double>& momentaryValues, const vector<int>& dialoguePercentages)
 {
 	SWS_SectionLock lock(&m_mutex);
-	m_integrated      = integrated;
-	m_range           = range;
-	m_truePeak        = truePeak;
-	m_truePeakPos     = truePeakPos;
-	m_shortTermMax    = shortTermMax;
-	m_momentaryMax    = momentaryMax;
-	m_shortTermValues = shortTermValues;
-	m_momentaryValues = momentaryValues;
+	m_integrated          = integrated;
+	m_range               = range;
+	m_truePeak            = truePeak;
+	m_truePeakPos         = truePeakPos;
+	m_shortTermMax        = shortTermMax;
+	m_momentaryMax        = momentaryMax;
+	m_shortTermValues     = shortTermValues;
+	m_momentaryValues     = momentaryValues;
+	m_dialoguePercentages = dialoguePercentages;
 }
 
-void BR_LoudnessObject::GetAnalyzeData (double* integrated, double* range, double* truePeak, double* truePeakPos, double* shortTermMax, double* momentaryMax, vector<double>* shortTermValues, vector<double>* momentaryValues)
+void NF_LoudnessObject::GetAnalyzeData (double* integrated, double* range, double* truePeak, double* truePeakPos, double* shortTermMax, double* momentaryMax, vector<double>* shortTermValues, vector<double>* momentaryValues, vector<int>* dialoguePercentages)
 {
 	SWS_SectionLock lock(&m_mutex);
-	WritePtr(integrated,      m_integrated);
-	WritePtr(range,           m_range);
-	WritePtr(truePeak,        m_truePeak);
-	WritePtr(truePeakPos,     m_truePeakPos);
-	WritePtr(shortTermMax,    m_shortTermMax);
-	WritePtr(momentaryMax,    m_momentaryMax);
-	WritePtr(shortTermValues, m_shortTermValues);
-	WritePtr(momentaryValues, m_momentaryValues);
+	WritePtr(integrated,          m_integrated);
+	WritePtr(range,               m_range);
+	WritePtr(truePeak,            m_truePeak);
+	WritePtr(truePeakPos,         m_truePeakPos);
+	WritePtr(shortTermMax,        m_shortTermMax);
+	WritePtr(momentaryMax,        m_momentaryMax);
+	WritePtr(shortTermValues,     m_shortTermValues);
+	WritePtr(momentaryValues,     m_momentaryValues);
+	WritePtr(dialoguePercentages, m_dialoguePercentages);
 }
 
-void BR_LoudnessObject::SetAnalyzedStatus (bool analyzed)
+void NF_LoudnessObject::SetAnalyzedStatus (bool analyzed)
 {
 	SWS_SectionLock lock(&m_mutex);
 	m_analyzed = analyzed;
 }
 
-bool BR_LoudnessObject::GetAnalyzedStatus ()
+bool NF_LoudnessObject::GetAnalyzedStatus ()
 {
 	SWS_SectionLock lock(&m_mutex);
 	return m_analyzed;
 }
 
-void BR_LoudnessObject::SetIntegratedOnly (bool integratedOnly)
+void NF_LoudnessObject::SetIntegratedOnly (bool integratedOnly)
 {
 	SWS_SectionLock lock(&m_mutex);
 	m_integratedOnly = integratedOnly;
 }
 
-bool BR_LoudnessObject::GetIntegratedOnly ()
+bool NF_LoudnessObject::GetIntegratedOnly ()
 {
 	SWS_SectionLock lock(&m_mutex);
 	return m_integratedOnly;
 }
 
-void BR_LoudnessObject::SetDoTruePeak (bool doTruePeak)
+void NF_LoudnessObject::SetDoTruePeak (bool doTruePeak)
 {
 	SWS_SectionLock lock(&m_mutex);
 	m_doTruePeak = doTruePeak;
 }
 
-bool BR_LoudnessObject::GetDoTruePeak ()
+bool NF_LoudnessObject::GetDoTruePeak ()
 {
 	SWS_SectionLock lock(&m_mutex);
 	return m_doTruePeak;
 }
 
-void BR_LoudnessObject::SetDoHighPrecisionMode(bool doHighPrecionMode)
-{
-	SWS_SectionLock lock(&m_mutex);
-	m_doHighPrecisionMode = doHighPrecionMode;
-}
-
-bool BR_LoudnessObject::GetDoHighPrecisionMode()
-{
-	SWS_SectionLock lock(&m_mutex);
-	return m_doHighPrecisionMode;
-}
-
-void BR_LoudnessObject::SetTruePeakAnalyzed (bool analyzed)
+void NF_LoudnessObject::SetTruePeakAnalyzed (bool analyzed)
 {
 	SWS_SectionLock lock(&m_mutex);
 	m_truePeakAnalyzed = analyzed;
 }
 
-bool BR_LoudnessObject::GetTruePeakAnalyzeStatus ()
+bool NF_LoudnessObject::GetTruePeakAnalyzeStatus ()
 {
 	SWS_SectionLock lock(&m_mutex);
 	return m_truePeakAnalyzed;
 }
 
-void BR_LoudnessObject::SetKillFlag (bool killFlag)
+void NF_LoudnessObject::SetKillFlag (bool killFlag)
 {
 	SWS_SectionLock lock(&m_mutex);
 	m_killFlag = killFlag;
 }
 
-bool BR_LoudnessObject::GetKillFlag ()
+bool NF_LoudnessObject::GetKillFlag ()
 {
 	SWS_SectionLock lock(&m_mutex);
 	return m_killFlag;
 }
 
-void BR_LoudnessObject::SetProcess (HANDLE process)
+void NF_LoudnessObject::SetProcess (HANDLE process)
 {
 	SWS_SectionLock lock(&m_mutex);
 	m_process = process;
 }
 
-HANDLE BR_LoudnessObject::GetProcess ()
+HANDLE NF_LoudnessObject::GetProcess ()
 {
 	SWS_SectionLock lock(&m_mutex);
 	return m_process;
 }
 
-WDL_FastString BR_LoudnessObject::GetTakeName ()
+WDL_FastString NF_LoudnessObject::GetTakeName ()
 {
 	SWS_SectionLock lock(&m_mutex);
 
@@ -1459,7 +1666,7 @@ WDL_FastString BR_LoudnessObject::GetTakeName ()
 	return takeName;
 }
 
-WDL_FastString BR_LoudnessObject::GetTrackName ()
+WDL_FastString NF_LoudnessObject::GetTrackName ()
 {
 	SWS_SectionLock lock(&m_mutex);
 
@@ -1487,7 +1694,7 @@ WDL_FastString BR_LoudnessObject::GetTrackName ()
 	return trackName;
 }
 
-MediaItem* BR_LoudnessObject::GetItem ()
+MediaItem* NF_LoudnessObject::GetItem ()
 {
 	SWS_SectionLock lock(&m_mutex);
 	MediaItem_Take* take = this->GetTake();
@@ -1497,43 +1704,43 @@ MediaItem* BR_LoudnessObject::GetItem ()
 		return NULL;
 }
 
-MediaTrack* BR_LoudnessObject::GetTrack ()
+MediaTrack* NF_LoudnessObject::GetTrack ()
 {
 	SWS_SectionLock lock(&m_mutex);
 	return m_track;
 }
 
-MediaItem_Take* BR_LoudnessObject::GetTake ()
+MediaItem_Take* NF_LoudnessObject::GetTake ()
 {
 	SWS_SectionLock lock(&m_mutex);
 	return m_take;
 }
 
-GUID BR_LoudnessObject::GetGuid ()
+GUID NF_LoudnessObject::GetGuid ()
 {
 	SWS_SectionLock lock(&m_mutex);
 	return m_guid;
 }
 
-void BR_LoudnessObject::SetTrack (MediaTrack* track)
+void NF_LoudnessObject::SetTrack (MediaTrack* track)
 {
 	SWS_SectionLock lock(&m_mutex);
 	m_track = track;
 }
 
-void BR_LoudnessObject::SetTake (MediaItem_Take* take)
+void NF_LoudnessObject::SetTake (MediaItem_Take* take)
 {
 	SWS_SectionLock lock(&m_mutex);
 	m_take = take;
 }
 
-void BR_LoudnessObject::SetGuid (GUID guid)
+void NF_LoudnessObject::SetGuid (GUID guid)
 {
 	SWS_SectionLock lock(&m_mutex);
 	m_guid = guid;
 }
 
-BR_LoudnessObject::AudioData::AudioData () :
+NF_LoudnessObject::AudioData::AudioData () :
 audio        (NULL),
 samplerate   (0),
 channels     (0),
@@ -1560,16 +1767,16 @@ static bool ProcessExtensionLine (const char *line, ProjectStateContext *ctx, bo
 
 	if (!strcmp(lp.gettoken_str(0), PROJ_SETTINGS_KEY))
 	{
-		g_pref.LoadProjPref(ctx);
+		g_NFpref.LoadProjPref(ctx);
 		return true;
 	}
 
 	if (!strcmp(lp.gettoken_str(0), PROJ_OBJECT_KEY))
 	{
-		if (BR_LoudnessObject* object = new (nothrow) BR_LoudnessObject())
+		if (NF_LoudnessObject* object = new (nothrow) NF_LoudnessObject())
 		{
 			if (object->RestoreObject(ctx))
-				g_analyzedObjects.Get()->Add(object);
+				g_NFanalyzedObjects.Get()->Add(object);
 			else
 				delete object;
 		}
@@ -1584,11 +1791,11 @@ static void SaveExtensionConfig (ProjectStateContext *ctx, bool isUndo, project_
 	if (isUndo)
 		return;
 
-	g_pref.SaveProjPref(ctx);
+	g_NFpref.SaveProjPref(ctx);
 
-	for (int i = 0; i < g_analyzedObjects.Get()->GetSize(); ++i)
+	for (int i = 0; i < g_NFanalyzedObjects.Get()->GetSize(); ++i)
 	{
-		if (BR_LoudnessObject* object = g_analyzedObjects.Get()->Get(i))
+		if (NF_LoudnessObject* object = g_NFanalyzedObjects.Get()->Get(i))
 		{
 			if (object->IsTargetValid())
 				object->SaveObject(ctx);
@@ -1601,53 +1808,53 @@ static void BeginLoadProjectState (bool isUndo, project_config_extension_t *reg)
 	if (isUndo)
 		return;
 
-	g_analyzedObjects.Get()->Empty(true);
-	g_analyzedObjects.Cleanup();
-	g_pref.CleanProjPref();
+	g_NFanalyzedObjects.Get()->Empty(true);
+	g_NFanalyzedObjects.Cleanup();
+	g_NFpref.CleanProjPref();
 }
 
-BR_LoudnessPref& BR_LoudnessPref::Get ()
+NF_LoudnessPref& NF_LoudnessPref::Get ()
 {
-	static BR_LoudnessPref s_instance;
+	static NF_LoudnessPref s_instance;
 	return s_instance;
 }
 
-double BR_LoudnessPref::LUtoLUFS (double lu)
+double NF_LoudnessPref::LUtoLUFS (double lu)
 {
 	return lu + this->GetReferenceLU();
 }
 
-double BR_LoudnessPref::LUFStoLU (double lufs)
+double NF_LoudnessPref::LUFStoLU (double lufs)
 {
 	return lufs - this->GetReferenceLU();
 }
 
-double BR_LoudnessPref::GetGraphMin ()
+double NF_LoudnessPref::GetGraphMin ()
 {
 	return m_projData.Get()->useProjGraph ? m_projData.Get()->graphMin : m_graphMin;
 }
 
-double BR_LoudnessPref::GetGraphMax ()
+double NF_LoudnessPref::GetGraphMax ()
 {
 	return m_projData.Get()->useProjGraph ? m_projData.Get()->graphMax : m_graphMax;
 }
 
-double BR_LoudnessPref::GetReferenceLU ()
+double NF_LoudnessPref::GetReferenceLU ()
 {
 	return (m_projData.Get()->useProjLU) ? (m_projData.Get()->valueLU) : (m_valueLU);
 }
 
-WDL_FastString BR_LoudnessPref::GetFormatedLUString ()
+WDL_FastString NF_LoudnessPref::GetFormatedLUString ()
 {
 	return m_projData.Get()->stringLU;
 }
 
-void BR_LoudnessPref::ShowPreferenceDlg (bool show)
+void NF_LoudnessPref::ShowPreferenceDlg (bool show)
 {
 	if (show)
 	{
 		if (!m_prefWnd)
-			m_prefWnd = CreateDialog(g_hInst, MAKEINTRESOURCE(IDD_BR_LOUDNESS_PREF), g_hwndParent, this->GlobalLoudnessPrefProc);
+			m_prefWnd = CreateDialog(g_hInst, MAKEINTRESOURCE(IDD_NF_DLG_LOUDNESS_PREF), g_hwndParent, this->GlobalLoudnessPrefProc);
 		else
 		{
 			ShowWindow(m_prefWnd, SW_SHOW);
@@ -1664,24 +1871,24 @@ void BR_LoudnessPref::ShowPreferenceDlg (bool show)
 	}
 }
 
-void BR_LoudnessPref::UpdatePreferenceDlg ()
+void NF_LoudnessPref::UpdatePreferenceDlg ()
 {
 	if (m_prefWnd)
-		SendMessage(m_prefWnd, WM_COMMAND, BR_LoudnessPref::READ_PROJDATA, 0);
+		SendMessage(m_prefWnd, WM_COMMAND, NF_LoudnessPref::READ_PROJDATA, 0);
 }
 
-bool BR_LoudnessPref::IsPreferenceDlgVisible ()
+bool NF_LoudnessPref::IsPreferenceDlgVisible ()
 {
 	return m_prefWnd ? true : false;
 }
 
-void BR_LoudnessPref::SaveGlobalPref ()
+void NF_LoudnessPref::SaveGlobalPref ()
 {
 	int luFormat;  // don't rely on enum values
-	if      (m_globalLUFormat == BR_LoudnessPref::LU)      luFormat = 0;
-	else if (m_globalLUFormat == BR_LoudnessPref::LU_AT_K) luFormat = 1;
-	else if (m_globalLUFormat == BR_LoudnessPref::LU_K)    luFormat = 2;
-	else if (m_globalLUFormat == BR_LoudnessPref::K)       luFormat = 3;
+	if      (m_globalLUFormat == NF_LoudnessPref::LU)      luFormat = 0;
+	else if (m_globalLUFormat == NF_LoudnessPref::LU_AT_K) luFormat = 1;
+	else if (m_globalLUFormat == NF_LoudnessPref::LU_K)    luFormat = 2;
+	else if (m_globalLUFormat == NF_LoudnessPref::K)       luFormat = 3;
 	else                                                   luFormat = 0;
 
 	char tmp[256];
@@ -1689,7 +1896,7 @@ void BR_LoudnessPref::SaveGlobalPref ()
 	WritePrivateProfileString("SWS", PREF_KEY, tmp, get_ini_file());
 }
 
-void BR_LoudnessPref::LoadGlobalPref ()
+void NF_LoudnessPref::LoadGlobalPref ()
 {
 	char tmp[256];
 	GetPrivateProfileString("SWS", PREF_KEY, "", tmp, sizeof(tmp), get_ini_file());
@@ -1701,14 +1908,14 @@ void BR_LoudnessPref::LoadGlobalPref ()
 	m_graphMin        = (lp.getnumtokens() > 2) ? lp.gettoken_float(2) : -41;
 	m_graphMax        = (lp.getnumtokens() > 3) ? lp.gettoken_float(3) : -14;
 
-	if      (m_globalLUFormat == 0) m_globalLUFormat = BR_LoudnessPref::LU;  // don't rely on enum values
-	else if (m_globalLUFormat == 1) m_globalLUFormat = BR_LoudnessPref::LU_AT_K;
-	else if (m_globalLUFormat == 2) m_globalLUFormat = BR_LoudnessPref::LU_K;
-	else if (m_globalLUFormat == 3) m_globalLUFormat = BR_LoudnessPref::K;
-	else                            m_globalLUFormat = BR_LoudnessPref::LU;
+	if      (m_globalLUFormat == 0) m_globalLUFormat = NF_LoudnessPref::LU;  // don't rely on enum values
+	else if (m_globalLUFormat == 1) m_globalLUFormat = NF_LoudnessPref::LU_AT_K;
+	else if (m_globalLUFormat == 2) m_globalLUFormat = NF_LoudnessPref::LU_K;
+	else if (m_globalLUFormat == 3) m_globalLUFormat = NF_LoudnessPref::K;
+	else                            m_globalLUFormat = NF_LoudnessPref::LU;
 }
 
-void BR_LoudnessPref::SaveProjPref (ProjectStateContext *ctx)
+void NF_LoudnessPref::SaveProjPref (ProjectStateContext *ctx)
 {
 	if (m_projData.Get()->useProjLU || m_projData.Get()->useProjGraph)
 	{
@@ -1719,7 +1926,7 @@ void BR_LoudnessPref::SaveProjPref (ProjectStateContext *ctx)
 	}
 }
 
-void BR_LoudnessPref::LoadProjPref (ProjectStateContext *ctx)
+void NF_LoudnessPref::LoadProjPref (ProjectStateContext *ctx)
 {
 	char line[256];
 	LineParser lp(false);
@@ -1741,22 +1948,22 @@ void BR_LoudnessPref::LoadProjPref (ProjectStateContext *ctx)
 		}
 	}
 
-	m_projData.Get()->stringLU = this->GetFormatedLUString(g_pref.m_globalLUFormat);
+	m_projData.Get()->stringLU = this->GetFormatedLUString(g_NFpref.m_globalLUFormat);
 }
 
-void BR_LoudnessPref::CleanProjPref ()
+void NF_LoudnessPref::CleanProjPref ()
 {
 	m_projData.Cleanup();
 }
 
-WDL_FastString BR_LoudnessPref::GetFormatedLUString (int mode, double* valueLU /*=NULL*/)
+WDL_FastString NF_LoudnessPref::GetFormatedLUString (int mode, double* valueLU /*=NULL*/)
 {
 	WDL_FastString string;
-	if (mode == BR_LoudnessPref::LU_AT_K)
+	if (mode == NF_LoudnessPref::LU_AT_K)
 		string.AppendFormatted(256, "%s%g", __LOCALIZE("LU at K", "sws_loudness"), valueLU ? *valueLU : this->GetReferenceLU());
-	else if (mode == BR_LoudnessPref::LU_K)
+	else if (mode == NF_LoudnessPref::LU_K)
 		string.AppendFormatted(256, "%s%g", __LOCALIZE("LU K", "sws_loudness"), valueLU ? *valueLU : this->GetReferenceLU());
-	else if (mode == BR_LoudnessPref::K)
+	else if (mode == NF_LoudnessPref::K)
 		string.AppendFormatted(256, "%s%g", __LOCALIZE("K", "sws_loudness"), valueLU ? *valueLU : this->GetReferenceLU());
 	else
 		string.AppendFormatted(256, "%s", __LOCALIZE("LU", "sws_loudness"));
@@ -1764,7 +1971,7 @@ WDL_FastString BR_LoudnessPref::GetFormatedLUString (int mode, double* valueLU /
 	return string;
 }
 
-WDL_DLGRET BR_LoudnessPref::GlobalLoudnessPrefProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+WDL_DLGRET NF_LoudnessPref::GlobalLoudnessPrefProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 	if (INT_PTR r = SNM_HookThemeColorsMessage(hwnd, uMsg, wParam, lParam))
 		return r;
@@ -1788,10 +1995,10 @@ WDL_DLGRET BR_LoudnessPref::GlobalLoudnessPrefProc (HWND hwnd, UINT uMsg, WPARAM
 			SendDlgItemMessage(hwnd, IDC_GLOBAL_LU, CB_ADDSTRING, 0, (LPARAM)"-20");
 			SendDlgItemMessage(hwnd, IDC_GLOBAL_LU, CB_ADDSTRING, 0, (LPARAM)"-23");
 
-			SendMessage(hwnd, WM_COMMAND, BR_LoudnessPref::READ_PROJDATA, 0);
+			SendMessage(hwnd, WM_COMMAND, NF_LoudnessPref::READ_PROJDATA, 0);
 
-			SetFocus(GetDlgItem(hwnd, g_pref.m_projData.Get()->useProjLU ? IDC_PROJ_LU : IDC_GLOBAL_LU));
-			SendMessage(GetDlgItem(hwnd, g_pref.m_projData.Get()->useProjLU ? IDC_PROJ_LU : IDC_GLOBAL_LU), EM_SETSEL, 0, -1);
+			SetFocus(GetDlgItem(hwnd, g_NFpref.m_projData.Get()->useProjLU ? IDC_PROJ_LU : IDC_GLOBAL_LU));
+			SendMessage(GetDlgItem(hwnd, g_NFpref.m_projData.Get()->useProjLU ? IDC_PROJ_LU : IDC_GLOBAL_LU), EM_SETSEL, 0, -1);
 			RestoreWindowPos(hwnd, PREF_WND, false);
 			ShowWindow(hwnd, SW_SHOW);
 		}
@@ -1808,7 +2015,7 @@ WDL_DLGRET BR_LoudnessPref::GlobalLoudnessPrefProc (HWND hwnd, UINT uMsg, WPARAM
 					EnableWindow(GetDlgItem(hwnd, IDC_MIN_PROJ), IsDlgButtonChecked(hwnd, IDC_ENB_PROJ_GRAPH));
 					EnableWindow(GetDlgItem(hwnd, IDC_MAX_PROJ), IsDlgButtonChecked(hwnd, IDC_ENB_PROJ_GRAPH));
 
-					SendMessage(hwnd, WM_COMMAND, BR_LoudnessPref::SAVE_PROJDATA, 0);
+					SendMessage(hwnd, WM_COMMAND, NF_LoudnessPref::SAVE_PROJDATA, 0);
 					MarkProjectDirty(NULL);
 				}
 				break;
@@ -1823,14 +2030,14 @@ WDL_DLGRET BR_LoudnessPref::GlobalLoudnessPrefProc (HWND hwnd, UINT uMsg, WPARAM
 						SendDlgItemMessage(hwnd, LOWORD(wParam), CB_GETLBTEXT, SendDlgItemMessage(hwnd, LOWORD(wParam), CB_GETCURSEL, 0, 0), (LPARAM)&tmp);
 						SetDlgItemText(hwnd, LOWORD(wParam), tmp);
 
-						SendMessage(hwnd, WM_COMMAND, BR_LoudnessPref::SAVE_PROJDATA, 0);
+						SendMessage(hwnd, WM_COMMAND, NF_LoudnessPref::SAVE_PROJDATA, 0);
 						if (LOWORD(wParam) == IDC_PROJ_LU)
 							MarkProjectDirty(NULL);
 					}
 
 					if (HIWORD(wParam) == CBN_EDITCHANGE)
 					{
-						SendMessage(hwnd, WM_COMMAND, BR_LoudnessPref::SAVE_PROJDATA, 0);
+						SendMessage(hwnd, WM_COMMAND, NF_LoudnessPref::SAVE_PROJDATA, 0);
 						if (LOWORD(wParam) == IDC_PROJ_LU)
 							MarkProjectDirty(NULL);
 					}
@@ -1844,7 +2051,7 @@ WDL_DLGRET BR_LoudnessPref::GlobalLoudnessPrefProc (HWND hwnd, UINT uMsg, WPARAM
 				{
 					if (HIWORD(wParam) == EN_CHANGE && GetFocus() == GetDlgItem(hwnd, LOWORD(wParam)))
 					{
-						SendMessage(hwnd, WM_COMMAND, BR_LoudnessPref::SAVE_PROJDATA, 0);
+						SendMessage(hwnd, WM_COMMAND, NF_LoudnessPref::SAVE_PROJDATA, 0);
 						if (LOWORD(wParam) == IDC_MIN_PROJ || LOWORD(wParam) == IDC_MAX_PROJ)
 							MarkProjectDirty(NULL);
 					}
@@ -1853,70 +2060,70 @@ WDL_DLGRET BR_LoudnessPref::GlobalLoudnessPrefProc (HWND hwnd, UINT uMsg, WPARAM
 				case IDC_LU_FORMAT:
 				{
 					if (HIWORD(wParam) == CBN_SELCHANGE)
-						SendMessage(hwnd, WM_COMMAND, BR_LoudnessPref::SAVE_PROJDATA, 0);
+						SendMessage(hwnd, WM_COMMAND, NF_LoudnessPref::SAVE_PROJDATA, 0);
 				}
 				break;
 
-				case BR_LoudnessPref::READ_PROJDATA:
+				case NF_LoudnessPref::READ_PROJDATA:
 				{
 					char tmp[256];
-					_snprintfSafe(tmp, sizeof(tmp), "%g", g_pref.m_valueLU);                  SetDlgItemText(hwnd, IDC_GLOBAL_LU, tmp);
-					_snprintfSafe(tmp, sizeof(tmp), "%g", g_pref.m_graphMin);                 SetDlgItemText(hwnd, IDC_MIN, tmp);
-					_snprintfSafe(tmp, sizeof(tmp), "%g", g_pref.m_graphMax);                 SetDlgItemText(hwnd, IDC_MAX, tmp);
-					_snprintfSafe(tmp, sizeof(tmp), "%g", g_pref.m_projData.Get()->valueLU);  SetDlgItemText(hwnd, IDC_PROJ_LU, tmp);
-					_snprintfSafe(tmp, sizeof(tmp), "%g", g_pref.m_projData.Get()->graphMin); SetDlgItemText(hwnd, IDC_MIN_PROJ, tmp);
-					_snprintfSafe(tmp, sizeof(tmp), "%g", g_pref.m_projData.Get()->graphMax); SetDlgItemText(hwnd, IDC_MAX_PROJ, tmp);
+					_snprintfSafe(tmp, sizeof(tmp), "%g", g_NFpref.m_valueLU);                  SetDlgItemText(hwnd, IDC_GLOBAL_LU, tmp);
+					_snprintfSafe(tmp, sizeof(tmp), "%g", g_NFpref.m_graphMin);                 SetDlgItemText(hwnd, IDC_MIN, tmp);
+					_snprintfSafe(tmp, sizeof(tmp), "%g", g_NFpref.m_graphMax);                 SetDlgItemText(hwnd, IDC_MAX, tmp);
+					_snprintfSafe(tmp, sizeof(tmp), "%g", g_NFpref.m_projData.Get()->valueLU);  SetDlgItemText(hwnd, IDC_PROJ_LU, tmp);
+					_snprintfSafe(tmp, sizeof(tmp), "%g", g_NFpref.m_projData.Get()->graphMin); SetDlgItemText(hwnd, IDC_MIN_PROJ, tmp);
+					_snprintfSafe(tmp, sizeof(tmp), "%g", g_NFpref.m_projData.Get()->graphMax); SetDlgItemText(hwnd, IDC_MAX_PROJ, tmp);
 
-					CheckDlgButton(hwnd, IDC_ENB_PROJ_LU,    g_pref.m_projData.Get()->useProjLU);
-					CheckDlgButton(hwnd, IDC_ENB_PROJ_GRAPH, g_pref.m_projData.Get()->useProjGraph);
+					CheckDlgButton(hwnd, IDC_ENB_PROJ_LU,    g_NFpref.m_projData.Get()->useProjLU);
+					CheckDlgButton(hwnd, IDC_ENB_PROJ_GRAPH, g_NFpref.m_projData.Get()->useProjGraph);
 
-					EnableWindow(GetDlgItem(hwnd, IDC_PROJ_LU),  g_pref.m_projData.Get()->useProjLU);
-					EnableWindow(GetDlgItem(hwnd, IDC_MIN_PROJ), g_pref.m_projData.Get()->useProjGraph);
-					EnableWindow(GetDlgItem(hwnd, IDC_MAX_PROJ), g_pref.m_projData.Get()->useProjGraph);
+					EnableWindow(GetDlgItem(hwnd, IDC_PROJ_LU),  g_NFpref.m_projData.Get()->useProjLU);
+					EnableWindow(GetDlgItem(hwnd, IDC_MIN_PROJ), g_NFpref.m_projData.Get()->useProjGraph);
+					EnableWindow(GetDlgItem(hwnd, IDC_MAX_PROJ), g_NFpref.m_projData.Get()->useProjGraph);
 
-					SendMessage(hwnd, WM_COMMAND, BR_LoudnessPref::UPDATE_LU_FORMAT_PREVIEW, 0);
+					SendMessage(hwnd, WM_COMMAND, NF_LoudnessPref::UPDATE_LU_FORMAT_PREVIEW, 0);
 				}
 				break;
 
-				case BR_LoudnessPref::SAVE_PROJDATA:
+				case NF_LoudnessPref::SAVE_PROJDATA:
 				{
 					char tmp[256];
-					GetDlgItemText(hwnd, IDC_GLOBAL_LU, tmp, sizeof(tmp)); g_pref.m_valueLU  = AltAtof(tmp);
-					GetDlgItemText(hwnd, IDC_MIN,       tmp, sizeof(tmp)); g_pref.m_graphMin = AltAtof(tmp);
-					GetDlgItemText(hwnd, IDC_MAX,       tmp, sizeof(tmp)); g_pref.m_graphMax = AltAtof(tmp);
-					GetDlgItemText(hwnd, IDC_PROJ_LU,   tmp, sizeof(tmp)); g_pref.m_projData.Get()->valueLU  = AltAtof(tmp);
-					GetDlgItemText(hwnd, IDC_MIN_PROJ,  tmp, sizeof(tmp)); g_pref.m_projData.Get()->graphMin = AltAtof(tmp);
-					GetDlgItemText(hwnd, IDC_MAX_PROJ,  tmp, sizeof(tmp)); g_pref.m_projData.Get()->graphMax = AltAtof(tmp);
+					GetDlgItemText(hwnd, IDC_GLOBAL_LU, tmp, sizeof(tmp)); g_NFpref.m_valueLU  = AltAtof(tmp);
+					GetDlgItemText(hwnd, IDC_MIN,       tmp, sizeof(tmp)); g_NFpref.m_graphMin = AltAtof(tmp);
+					GetDlgItemText(hwnd, IDC_MAX,       tmp, sizeof(tmp)); g_NFpref.m_graphMax = AltAtof(tmp);
+					GetDlgItemText(hwnd, IDC_PROJ_LU,   tmp, sizeof(tmp)); g_NFpref.m_projData.Get()->valueLU  = AltAtof(tmp);
+					GetDlgItemText(hwnd, IDC_MIN_PROJ,  tmp, sizeof(tmp)); g_NFpref.m_projData.Get()->graphMin = AltAtof(tmp);
+					GetDlgItemText(hwnd, IDC_MAX_PROJ,  tmp, sizeof(tmp)); g_NFpref.m_projData.Get()->graphMax = AltAtof(tmp);
 
-					g_pref.m_projData.Get()->useProjLU    = !!IsDlgButtonChecked(hwnd, IDC_ENB_PROJ_LU);
-					g_pref.m_projData.Get()->useProjGraph = !!IsDlgButtonChecked(hwnd, IDC_ENB_PROJ_GRAPH);
+					g_NFpref.m_projData.Get()->useProjLU    = !!IsDlgButtonChecked(hwnd, IDC_ENB_PROJ_LU);
+					g_NFpref.m_projData.Get()->useProjGraph = !!IsDlgButtonChecked(hwnd, IDC_ENB_PROJ_GRAPH);
 
-					g_pref.m_globalLUFormat = (int)SendDlgItemMessage(hwnd, IDC_LU_FORMAT, CB_GETCURSEL, 0, 0);
+					g_NFpref.m_globalLUFormat = (int)SendDlgItemMessage(hwnd, IDC_LU_FORMAT, CB_GETCURSEL, 0, 0);
 
-					SendMessage(hwnd, WM_COMMAND, BR_LoudnessPref::UPDATE_LU_FORMAT_PREVIEW, 0);
+					SendMessage(hwnd, WM_COMMAND, NF_LoudnessPref::UPDATE_LU_FORMAT_PREVIEW, 0);
 					LoudnessUpdate(false);
 				}
 				break;
 
-				case BR_LoudnessPref::UPDATE_LU_FORMAT_PREVIEW:
+				case NF_LoudnessPref::UPDATE_LU_FORMAT_PREVIEW:
 				{
-					for (int i = 0; i < BR_LoudnessPref::LU_FORMAT_COUNT; ++i)
+					for (int i = 0; i < NF_LoudnessPref::LU_FORMAT_COUNT; ++i)
 						SendDlgItemMessage(hwnd, IDC_LU_FORMAT, CB_DELETESTRING, 0, 0);
 
-					for (int i = 0; i < BR_LoudnessPref::LU_FORMAT_COUNT; ++i)
-						SendDlgItemMessage(hwnd, IDC_LU_FORMAT, CB_ADDSTRING, 0, (LPARAM)g_pref.GetFormatedLUString(i).Get());
+					for (int i = 0; i < NF_LoudnessPref::LU_FORMAT_COUNT; ++i)
+						SendDlgItemMessage(hwnd, IDC_LU_FORMAT, CB_ADDSTRING, 0, (LPARAM)g_NFpref.GetFormatedLUString(i).Get());
 
-					g_pref.m_projData.Get()->stringLU = g_pref.GetFormatedLUString(g_pref.m_globalLUFormat);
-					SendDlgItemMessage(hwnd, IDC_LU_FORMAT, CB_SETCURSEL, g_pref.m_globalLUFormat, 0);
+					g_NFpref.m_projData.Get()->stringLU = g_NFpref.GetFormatedLUString(g_NFpref.m_globalLUFormat);
+					SendDlgItemMessage(hwnd, IDC_LU_FORMAT, CB_SETCURSEL, g_NFpref.m_globalLUFormat, 0);
 				}
 				break;
 
 				case IDOK:
 				case IDCANCEL:
 				{
-					SendMessage(hwnd, WM_COMMAND, BR_LoudnessPref::SAVE_PROJDATA, 0);
+					SendMessage(hwnd, WM_COMMAND, NF_LoudnessPref::SAVE_PROJDATA, 0);
 					DestroyWindow(hwnd);
-					g_pref.m_prefWnd = NULL;
+					g_NFpref.m_prefWnd = NULL;
 				}
 				break;
 			}
@@ -1933,26 +2140,26 @@ WDL_DLGRET BR_LoudnessPref::GlobalLoudnessPrefProc (HWND hwnd, UINT uMsg, WPARAM
 	return 0;
 }
 
-BR_LoudnessPref::BR_LoudnessPref () :
+NF_LoudnessPref::NF_LoudnessPref () :
 m_prefWnd        (NULL),
 m_valueLU        (-23),
 m_graphMin       (-41),
 m_graphMax       (-14),
-m_globalLUFormat (BR_LoudnessPref::LU_K)
+m_globalLUFormat (NF_LoudnessPref::LU_K)
 {
 }
 
-BR_LoudnessPref::ProjData::ProjData () :
+NF_LoudnessPref::ProjData::ProjData () :
 useProjLU    (false),
 useProjGraph (false),
 valueLU      (-23),
 graphMin     (-41),
 graphMax     (-14)
 {
-	valueLU  = g_pref.m_valueLU;
-	graphMin = g_pref.m_graphMin;
-	graphMax = g_pref.m_graphMax;
-	stringLU = g_pref.GetFormatedLUString(g_pref.m_globalLUFormat, &g_pref.m_valueLU); // need to supply the value otherwise the object calls itself in constructor
+	valueLU  = g_NFpref.m_valueLU;
+	graphMin = g_NFpref.m_graphMin;
+	graphMax = g_NFpref.m_graphMax;
+	stringLU = g_NFpref.GetFormatedLUString(g_NFpref.m_globalLUFormat, &g_NFpref.m_valueLU); // need to supply the value otherwise the object calls itself in constructor
 }
 
 /******************************************************************************
@@ -1963,8 +2170,8 @@ static WDL_DLGRET NormalizeProgressProc (HWND hwnd, UINT uMsg, WPARAM wParam, LP
 	if (INT_PTR r = SNM_HookThemeColorsMessage(hwnd, uMsg, wParam, lParam))
 		return r;
 
-	static BR_NormalizeData* s_normalizeData = NULL;
-	static BR_LoudnessObject* s_currentItem  = NULL;
+	static NF_NormalizeData* s_normalizeData = NULL;
+	static NF_LoudnessObject* s_currentItem  = NULL;
 
 	static int  s_currentItemId      = 0;
 	static bool s_analyzeInProgress  = false;
@@ -1981,7 +2188,7 @@ static WDL_DLGRET NormalizeProgressProc (HWND hwnd, UINT uMsg, WPARAM wParam, LP
 		case WM_INITDIALOG:
 		{
 			// Reset variables
-			s_normalizeData = (BR_NormalizeData*)lParam;
+			s_normalizeData = (NF_NormalizeData*)lParam;
 			if (!s_normalizeData || !s_normalizeData->items)
 			{
 				EndDialog(hwnd, 0);
@@ -1998,7 +2205,7 @@ static WDL_DLGRET NormalizeProgressProc (HWND hwnd, UINT uMsg, WPARAM wParam, LP
 			// Get progress data
 			for (int i = 0; i < s_normalizeData->items->GetSize(); ++i)
 			{
-				if (BR_LoudnessObject* item = s_normalizeData->items->Get(i))
+				if (NF_LoudnessObject* item = s_normalizeData->items->Get(i))
 					s_itemsLen += item->GetAudioLength();
 			}
 			if (s_itemsLen == 0) s_itemsLen = 1; // to prevent division by zero
@@ -2058,7 +2265,7 @@ static WDL_DLGRET NormalizeProgressProc (HWND hwnd, UINT uMsg, WPARAM wParam, LP
 					bool undoItem  = false;
 					for (int i = 0; i < s_normalizeData->items->GetSize(); ++i)
 					{
-						if (BR_LoudnessObject* item = s_normalizeData->items->Get(i))
+						if (NF_LoudnessObject* item = s_normalizeData->items->Get(i))
 						{
 							if (item->NormalizeIntegrated(s_normalizeData->targetLufs))
 							{
@@ -2088,16 +2295,7 @@ static WDL_DLGRET NormalizeProgressProc (HWND hwnd, UINT uMsg, WPARAM wParam, LP
 				if ((s_currentItem = s_normalizeData->items->Get(s_currentItemId)))
 				{
 					s_currentItemLen = s_currentItem->GetAudioLength();
-
-					// check if user set high precision mode 
-					bool doHighPrecisionMode = false;
-					if (!s_normalizeData->quickMode) 
-					{
-						doHighPrecisionMode = !!IsHighPrecisionOptionEnabled(NULL);
-
-					}
-					
-					s_currentItem->Analyze(s_normalizeData->quickMode, false, doHighPrecisionMode);
+					s_currentItem->Analyze(s_normalizeData->quickMode, false);
 					s_analyzeInProgress = true;
 				}
 				else
@@ -2136,24 +2334,24 @@ static WDL_DLGRET NormalizeProgressProc (HWND hwnd, UINT uMsg, WPARAM wParam, LP
 	return 0;
 }
 
-void NormalizeAndShowProgress (BR_NormalizeData* normalizeData)
+void NF_DialogueLoudness::NormalizeAndShowProgress (NF_NormalizeData* normalizeData)
 {
 	static bool s_normalizeInProgress = false;
 
 	if (!s_normalizeInProgress)
 	{
 		// Kill all normalize dialogs prior to normalizing
-		if (BR_AnalyzeLoudnessWnd* dialog = g_loudnessWndManager.Get())
+		if (NF_AnalyzeLoudnessWnd* dialog = g_NFloudnessWndManager.Get())
 			dialog->KillNormalizeDlg();
-		if (g_normalizeWnd)
+		if (g_NFnormalizeWnd)
 		{
-			DestroyWindow(g_normalizeWnd);
-			g_normalizeWnd = NULL;
-			RefreshToolbar(NamedCommandLookup("_BR_NORMALIZE_LOUDNESS_ITEMS"));
+			DestroyWindow(g_NFnormalizeWnd);
+			g_NFnormalizeWnd = NULL;
+			RefreshToolbar(NamedCommandLookup("NF_NORMALIZE_DLG_LOUDNESS_ITEMS"));
 		}
 
 		s_normalizeInProgress = true;
-		DialogBoxParam(g_hInst, MAKEINTRESOURCE(IDD_BR_LOUDNESS_NORM_PROGRESS), g_hwndParent, NormalizeProgressProc, (LPARAM)normalizeData);
+		DialogBoxParam(g_hInst, MAKEINTRESOURCE(IDD_NF_DLG_LOUDNESS_NORM_PROGRESS), g_hwndParent, NormalizeProgressProc, (LPARAM)normalizeData);
 		s_normalizeInProgress = false;
 	}
 }
@@ -2161,57 +2359,57 @@ void NormalizeAndShowProgress (BR_NormalizeData* normalizeData)
 /******************************************************************************
 * Analyze loudness list view                                                  *
 ******************************************************************************/
-BR_AnalyzeLoudnessView::BR_AnalyzeLoudnessView (HWND hwndList, HWND hwndEdit)
+NF_AnalyzeLoudnessView::NF_AnalyzeLoudnessView (HWND hwndList, HWND hwndEdit)
 :SWS_ListView(hwndList, hwndEdit, COL_COUNT, g_cols, LOUDNESS_VIEW_WND, false, "sws_DLG_174")
 {
 }
 
-void BR_AnalyzeLoudnessView::GetItemText (SWS_ListItem* item, int iCol, char* str, int iStrMax)
+void NF_AnalyzeLoudnessView::GetItemText (SWS_ListItem* item, int iCol, char* str, int iStrMax)
 {
 	WritePtr(str, '\0');
-	if (BR_LoudnessObject* listItem = (BR_LoudnessObject*)item)
-		listItem->GetColumnStr(iCol, str, iStrMax, g_loudnessWndManager.Get()->GetProperty(BR_AnalyzeLoudnessWnd::USING_LU));
+	if (NF_LoudnessObject* listItem = (NF_LoudnessObject*)item)
+		listItem->GetColumnStr(iCol, str, iStrMax, g_NFloudnessWndManager.Get()->GetProperty(NF_AnalyzeLoudnessWnd::USING_LU));
 }
 
-void BR_AnalyzeLoudnessView::GetItemList (SWS_ListItemList* pList)
+void NF_AnalyzeLoudnessView::GetItemList (SWS_ListItemList* pList)
 {
-	for (int i = 0; i < g_analyzedObjects.Get()->GetSize(); ++i)
-		pList->Add((SWS_ListItem*)g_analyzedObjects.Get()->Get(i));
+	for (int i = 0; i < g_NFanalyzedObjects.Get()->GetSize(); ++i)
+		pList->Add((SWS_ListItem*)g_NFanalyzedObjects.Get()->Get(i));
 }
 
-void BR_AnalyzeLoudnessView::OnItemSelChanged (SWS_ListItem* item, int iState)
+void NF_AnalyzeLoudnessView::OnItemSelChanged (SWS_ListItem* item, int iState)
 {
-	if (g_loudnessWndManager.Get()->GetProperty(BR_AnalyzeLoudnessWnd::MIRROR_PROJ_SELECTION) && item)
+	if (g_NFloudnessWndManager.Get()->GetProperty(NF_AnalyzeLoudnessWnd::MIRROR_PROJ_SELECTION) && item)
 	{
-		BR_LoudnessObject* listItem = (BR_LoudnessObject*)item;
+		NF_LoudnessObject* listItem = (NF_LoudnessObject*)item;
 		listItem->SetSelectedInProject(!!iState);
 	}
-	g_loudnessWndManager.Get()->Update(false);
+	g_NFloudnessWndManager.Get()->Update(false);
 }
 
-void BR_AnalyzeLoudnessView::OnItemDblClk (SWS_ListItem* item, int iCol)
+void NF_AnalyzeLoudnessView::OnItemDblClk (SWS_ListItem* item, int iCol)
 {
-	if (BR_LoudnessObject* listItem = (BR_LoudnessObject*)item)
+	if (NF_LoudnessObject* listItem = (NF_LoudnessObject*)item)
 	{
 		if (iCol == COL_SHORTTERM)
-			listItem->GoToShortTermMax(g_loudnessWndManager.Get()->GetProperty(BR_AnalyzeLoudnessWnd::TIME_SEL_OVER_MAX));
+			listItem->GoToShortTermMax(g_NFloudnessWndManager.Get()->GetProperty(NF_AnalyzeLoudnessWnd::TIME_SEL_OVER_MAX));
 		else if (iCol == COL_MOMENTARY)
-			listItem->GoToMomentaryMax(g_loudnessWndManager.Get()->GetProperty(BR_AnalyzeLoudnessWnd::TIME_SEL_OVER_MAX));
+			listItem->GoToMomentaryMax(g_NFloudnessWndManager.Get()->GetProperty(NF_AnalyzeLoudnessWnd::TIME_SEL_OVER_MAX));
 		else if (iCol == COL_TRUEPEAK)
 			listItem->GoToTruePeak();
-		else if (g_loudnessWndManager.Get()->GetProperty(BR_AnalyzeLoudnessWnd::DOUBLECLICK_GOTO_TARGET))
+		else if (g_NFloudnessWndManager.Get()->GetProperty(NF_AnalyzeLoudnessWnd::DOUBLECLICK_GOTO_TARGET))
 			listItem->GoToTarget();
 	}
 }
 
-int BR_AnalyzeLoudnessView::OnItemSort (SWS_ListItem* item1, SWS_ListItem* item2)
+int NF_AnalyzeLoudnessView::OnItemSort (SWS_ListItem* item1, SWS_ListItem* item2)
 {
 	int column = abs(m_iSortCol)-1;
 
 	if ((item1 && item2) && (column == COL_INTEGRATED || column == COL_RANGE || column == COL_TRUEPEAK || column == COL_SHORTTERM || column == COL_MOMENTARY))
 	{
-		double i1 = ((BR_LoudnessObject*)item1)->GetColumnVal(column, g_loudnessWndManager.Get()->GetProperty(BR_AnalyzeLoudnessWnd::USING_LU));
-		double i2 = ((BR_LoudnessObject*)item2)->GetColumnVal(column, g_loudnessWndManager.Get()->GetProperty(BR_AnalyzeLoudnessWnd::USING_LU));
+		double i1 = ((NF_LoudnessObject*)item1)->GetColumnVal(column, g_NFloudnessWndManager.Get()->GetProperty(NF_AnalyzeLoudnessWnd::USING_LU));
+		double i2 = ((NF_LoudnessObject*)item2)->GetColumnVal(column, g_NFloudnessWndManager.Get()->GetProperty(NF_AnalyzeLoudnessWnd::USING_LU));
 
 		int iRet = 0;
 		if (i1 > i2)      iRet = 1;
@@ -2224,17 +2422,17 @@ int BR_AnalyzeLoudnessView::OnItemSort (SWS_ListItem* item1, SWS_ListItem* item2
 		return SWS_ListView::OnItemSort(item1, item2);
 }
 
-void BR_AnalyzeLoudnessView::OnItemSortEnd ()
+void NF_AnalyzeLoudnessView::OnItemSortEnd ()
 {
-	if (g_loudnessWndManager.Get()) // prevent crash on reaper startup (calling object still in construction)
-		g_loudnessWndManager.Get()->Update(false);
+	if (g_NFloudnessWndManager.Get()) // prevent crash on reaper startup (calling object still in construction)
+		g_NFloudnessWndManager.Get()->Update(false);
 }
 
 /******************************************************************************
 * Analyze loudness window                                                     *
 ******************************************************************************/
-BR_AnalyzeLoudnessWnd::BR_AnalyzeLoudnessWnd () :
-SWS_DockWnd(IDD_BR_LOUDNESS_ANALYZER, __LOCALIZE("Loudness", "sws_DLG_174"), "", SWSGetCommandID(AnalyzeLoudness)),
+NF_AnalyzeLoudnessWnd::NF_AnalyzeLoudnessWnd () :
+SWS_DockWnd(IDD_NF_DLG_LOUDNESS_ANALYZER, __LOCALIZE("Dialogue loudness", "sws_DLG_174"), "", SWSGetCommandID(NF_AnalyzeLoudness)),
 m_objectsLen        (0),
 m_currentObjectId   (0),
 m_analyzeInProgress (false),
@@ -2246,11 +2444,11 @@ m_exportFormatWnd   (NULL)
 	Init(); // Must call SWS_DockWnd::Init() to restore parameters and open the window if necessary
 }
 
-BR_AnalyzeLoudnessWnd::~BR_AnalyzeLoudnessWnd ()
+NF_AnalyzeLoudnessWnd::~NF_AnalyzeLoudnessWnd ()
 {
 }
 
-void BR_AnalyzeLoudnessWnd::Update (bool updateList /*=true*/)
+void NF_AnalyzeLoudnessWnd::Update (bool updateList /*=true*/)
 {
 	if (this->IsValidWindow())
 	{
@@ -2263,18 +2461,18 @@ void BR_AnalyzeLoudnessWnd::Update (bool updateList /*=true*/)
 			SetDlgItemText(m_hwnd, IDC_ANALYZE, __LOCALIZE("Analyze selected items", "sws_DLG_174"));
 
 		if (m_normalizeWnd)
-			SendMessage(m_normalizeWnd, WM_COMMAND, BR_AnalyzeLoudnessWnd::READ_PROJDATA, 0);
+			SendMessage(m_normalizeWnd, WM_COMMAND, NF_AnalyzeLoudnessWnd::READ_PROJDATA, 0);
 		if (m_exportFormatWnd)
-			SendMessage(m_exportFormatWnd, WM_COMMAND, BR_AnalyzeLoudnessWnd::UPDATE_FORMAT_AND_PREVIEW, 0);
+			SendMessage(m_exportFormatWnd, WM_COMMAND, NF_AnalyzeLoudnessWnd::UPDATE_FORMAT_AND_PREVIEW, 0);
 	}
 }
 
-void BR_AnalyzeLoudnessWnd::KillNormalizeDlg ()
+void NF_AnalyzeLoudnessWnd::KillNormalizeDlg ()
 {
 	this->ShowNormalizeDialog(false);
 }
 
-bool BR_AnalyzeLoudnessWnd::GetProperty (int propertySpecifier)
+bool NF_AnalyzeLoudnessWnd::GetProperty (int propertySpecifier)
 {
 	switch (propertySpecifier)
 	{
@@ -2282,29 +2480,15 @@ bool BR_AnalyzeLoudnessWnd::GetProperty (int propertySpecifier)
 		case DOUBLECLICK_GOTO_TARGET: return m_properties.doubleClickGoToTarget;
 		case USING_LU:                return m_properties.usingLU;
 		case MIRROR_PROJ_SELECTION:   return m_properties.mirrorProjSelection;
-		case DO_HIGH_PRECISION_MODE:  return m_properties.doHighPrecisionMode;
 	}
 	return false;
 }
 
-bool BR_AnalyzeLoudnessWnd::SetProperty(int propertySpecifier, bool newVal)
+NF_LoudnessObject* NF_AnalyzeLoudnessWnd::IsObjectInList (MediaTrack* track)
 {
-	switch (propertySpecifier)
+	for (int i = 0; i < g_NFanalyzedObjects.Get()->GetSize(); ++i)
 	{
-		// case TIME_SEL_OVER_MAX:       m_properties.timeSelOverMax = newVal; return true;
-		// case DOUBLECLICK_GOTO_TARGET: m_properties.doubleClickGoToTarget = newVal; return true;
-		// case USING_LU:                m_properties.usingLU = newVal; return true;
-		// case MIRROR_PROJ_SELECTION:   m_properties.mirrorProjSelection = newVal; return true;
-		case DO_HIGH_PRECISION_MODE:     m_properties.doHighPrecisionMode = newVal; return true;
-	}
-	return false;
-}
-
-BR_LoudnessObject* BR_AnalyzeLoudnessWnd::IsObjectInList (MediaTrack* track)
-{
-	for (int i = 0; i < g_analyzedObjects.Get()->GetSize(); ++i)
-	{
-		if (BR_LoudnessObject* object = g_analyzedObjects.Get()->Get(i))
+		if (NF_LoudnessObject* object = g_NFanalyzedObjects.Get()->Get(i))
 		{
 			if (object->CheckTarget(track))
 				return object;
@@ -2313,11 +2497,11 @@ BR_LoudnessObject* BR_AnalyzeLoudnessWnd::IsObjectInList (MediaTrack* track)
 	return NULL;
 }
 
-BR_LoudnessObject* BR_AnalyzeLoudnessWnd::IsObjectInList (MediaItem_Take* take)
+NF_LoudnessObject* NF_AnalyzeLoudnessWnd::IsObjectInList (MediaItem_Take* take)
 {
-	for (int i = 0; i < g_analyzedObjects.Get()->GetSize(); ++i)
+	for (int i = 0; i < g_NFanalyzedObjects.Get()->GetSize(); ++i)
 	{
-		if (BR_LoudnessObject* object = g_analyzedObjects.Get()->Get(i))
+		if (NF_LoudnessObject* object = g_NFanalyzedObjects.Get()->Get(i))
 		{
 			if (object->CheckTarget(take))
 				return object;
@@ -2326,14 +2510,14 @@ BR_LoudnessObject* BR_AnalyzeLoudnessWnd::IsObjectInList (MediaItem_Take* take)
 	return NULL;
 }
 
-void BR_AnalyzeLoudnessWnd::AbortAnalyze ()
+void NF_AnalyzeLoudnessWnd::AbortAnalyze ()
 {
 	SetAnalyzing(false, false);
 
 	// Make sure objects already in the list are NOT destroyed
 	for (int i = 0; i < m_analyzeQueue.GetSize(); ++i)
 	{
-		if (g_analyzedObjects.Get()->Find(m_analyzeQueue.Get(i)) != -1)
+		if (g_NFanalyzedObjects.Get()->Find(m_analyzeQueue.Get(i)) != -1)
 			m_analyzeQueue.Delete(i--, false);
 	}
 	m_analyzeQueue.Empty(true);
@@ -2341,7 +2525,7 @@ void BR_AnalyzeLoudnessWnd::AbortAnalyze ()
 	m_currentObjectId = 0;
 }
 
-void BR_AnalyzeLoudnessWnd::AbortReanalyze ()
+void NF_AnalyzeLoudnessWnd::AbortReanalyze ()
 {
 	SetAnalyzing(false, true);
 
@@ -2350,7 +2534,7 @@ void BR_AnalyzeLoudnessWnd::AbortReanalyze ()
 	m_currentObjectId = 0;
 }
 
-void BR_AnalyzeLoudnessWnd::SetAnalyzing (const bool analyzing, const bool reanalyze)
+void NF_AnalyzeLoudnessWnd::SetAnalyzing (const bool analyzing, const bool reanalyze)
 {
 	ShowWindow(GetDlgItem(m_hwnd, IDC_PROGRESS), analyzing ? SW_SHOW : SW_HIDE);
 	SendMessage(GetDlgItem(m_hwnd, IDC_PROGRESS), PBM_SETPOS, 0, 0);
@@ -2368,26 +2552,26 @@ void BR_AnalyzeLoudnessWnd::SetAnalyzing (const bool analyzing, const bool reana
 	}
 }
 
-void BR_AnalyzeLoudnessWnd::ClearList ()
+void NF_AnalyzeLoudnessWnd::ClearList ()
 {
 	// Make sure objects in analyze queue are not destroyed (prior to clearing the list, existing objects are put there to make analysis faster)
 	for (int i = 0; i < m_analyzeQueue.GetSize(); ++i)
 	{
-		int id = g_analyzedObjects.Get()->Find(m_analyzeQueue.Get(i));
+		int id = g_NFanalyzedObjects.Get()->Find(m_analyzeQueue.Get(i));
 		if (id != -1)
-			 g_analyzedObjects.Get()->Delete(id, false);
+			 g_NFanalyzedObjects.Get()->Delete(id, false);
 	}
-	g_analyzedObjects.Get()->Empty(true);
+	g_NFanalyzedObjects.Get()->Empty(true);
 	this->Update();
 }
 
-void BR_AnalyzeLoudnessWnd::ShowExportFormatDialog (bool show)
+void NF_AnalyzeLoudnessWnd::ShowExportFormatDialog (bool show)
 {
 	if (show)
 	{
 		if (!m_exportFormatWnd)
 		{
-			m_exportFormatWnd = CreateDialog(g_hInst, MAKEINTRESOURCE(IDD_BR_LOUDNESS_EXPORT_FORMAT), m_hwnd, this->ExportFormatDialogProc);
+			m_exportFormatWnd = CreateDialog(g_hInst, MAKEINTRESOURCE(IDD_NF_DLG_LOUDNESS_EXPORT_FORMAT), m_hwnd, this->ExportFormatDialogProc);
 			#ifndef _WIN32
 				SWELL_SetWindowLevel(m_exportFormatWnd, 3); // NSFloatingWindowLevel
 			#endif
@@ -2408,13 +2592,13 @@ void BR_AnalyzeLoudnessWnd::ShowExportFormatDialog (bool show)
 	}
 }
 
-void BR_AnalyzeLoudnessWnd::ShowNormalizeDialog (bool show)
+void NF_AnalyzeLoudnessWnd::ShowNormalizeDialog (bool show)
 {
 	if (show)
 	{
 		if (!m_normalizeWnd)
 		{
-			m_normalizeWnd = CreateDialog(g_hInst, MAKEINTRESOURCE(IDD_BR_LOUDNESS_ANALYZER_NORM), m_hwnd, this->NormalizeDialogProc);
+			m_normalizeWnd = CreateDialog(g_hInst, MAKEINTRESOURCE(IDD_NF_DLG_LOUDNESS_ANALYZER_NORM), m_hwnd, this->NormalizeDialogProc);
 			#ifndef _WIN32
 				SWELL_SetWindowLevel(m_normalizeWnd, 3); // NSFloatingWindowLevel
 			#endif
@@ -2435,23 +2619,7 @@ void BR_AnalyzeLoudnessWnd::ShowNormalizeDialog (bool show)
 	}
 }
 
-void BR_AnalyzeLoudnessWnd::LoadProperties()
-{
-	if (g_loudnessWndManager.Create())
-	{
-		m_properties.Load();
-	}
-}
-
-void BR_AnalyzeLoudnessWnd::SaveProperties()
-{
-	if (g_loudnessWndManager.Create())
-	{
-		m_properties.Save();
-	}
-}
-
-void BR_AnalyzeLoudnessWnd::SaveRecentFormatPattern (WDL_FastString pattern)
+void NF_AnalyzeLoudnessWnd::SaveRecentFormatPattern (WDL_FastString pattern)
 {
 	bool patternNeedsSaving = false;
 
@@ -2495,7 +2663,7 @@ void BR_AnalyzeLoudnessWnd::SaveRecentFormatPattern (WDL_FastString pattern)
 	}
 }
 
-WDL_FastString BR_AnalyzeLoudnessWnd::GetRecentFormatPattern (int id)
+WDL_FastString NF_AnalyzeLoudnessWnd::GetRecentFormatPattern (int id)
 {
 	char tmp[256];
 	GetPrivateProfileString("SWS", this->GetRecentFormatPatternKey(id).Get(), "", tmp, sizeof(tmp), get_ini_file());
@@ -2505,25 +2673,25 @@ WDL_FastString BR_AnalyzeLoudnessWnd::GetRecentFormatPattern (int id)
 	return pattern;
 }
 
-WDL_FastString BR_AnalyzeLoudnessWnd::GetRecentFormatPatternKey (int id)
+WDL_FastString NF_AnalyzeLoudnessWnd::GetRecentFormatPatternKey (int id)
 {
 	WDL_FastString key;
 	key.AppendFormatted(256, "%s%.2d", EXPORT_FORMAT_RECENT, id);
 	return key;
 }
 
-WDL_FastString BR_AnalyzeLoudnessWnd::CreateExportString (bool previewOnly)
+WDL_FastString NF_AnalyzeLoudnessWnd::CreateExportString (bool previewOnly)
 {
-	WDL_PtrList<BR_LoudnessObject> objects;
+	WDL_PtrList<NF_LoudnessObject> objects;
 	WDL_PtrList_DeleteOnDestroy<WDL_FastString> strings;
 	if (previewOnly)
 	{
 		int x = 0;
-		if (BR_LoudnessObject* listItem = (BR_LoudnessObject*)m_list->EnumSelected(&x))
+		if (NF_LoudnessObject* listItem = (NF_LoudnessObject*)m_list->EnumSelected(&x))
 			objects.Add(listItem);
 		else if (m_list->GetListItemCount())
 		{
-			if (BR_LoudnessObject* listItem = (BR_LoudnessObject*)m_list->GetListItem(0))
+			if (NF_LoudnessObject* listItem = (NF_LoudnessObject*)m_list->GetListItem(0))
 				objects.Add(listItem);
 		}
 		strings.Add(new WDL_FastString());
@@ -2531,7 +2699,7 @@ WDL_FastString BR_AnalyzeLoudnessWnd::CreateExportString (bool previewOnly)
 	else
 	{
 		int x = 0;
-		while (BR_LoudnessObject* listItem = (BR_LoudnessObject*)m_list->EnumSelected(&x))
+		while (NF_LoudnessObject* listItem = (NF_LoudnessObject*)m_list->EnumSelected(&x))
 		{
 			objects.Add(listItem);
 			strings.Add(new WDL_FastString());
@@ -2608,13 +2776,13 @@ WDL_FastString BR_AnalyzeLoudnessWnd::CreateExportString (bool previewOnly)
 				else if ((foundWildcard = !strncmp(format, "$luformat", strlen("$luformat"))))
 				{
 					for (int i = 0; i < strings.GetSize(); ++i)
-						strings.Get(i)->Append(g_pref.GetFormatedLUString().Get());
+						strings.Get(i)->Append(g_NFpref.GetFormatedLUString().Get());
 					step = strlen("$luformat");
 				}
 				else if ((foundWildcard = !strncmp(format, "$lureference", strlen("$lureference"))))
 				{
 					for (int i = 0; i < strings.GetSize(); ++i)
-						strings.Get(i)->AppendFormatted(128, "%g %s", g_pref.GetReferenceLU(), __LOCALIZE("LUFS", "sws_loudness"));
+						strings.Get(i)->AppendFormatted(128, "%g %s", g_NFpref.GetReferenceLU(), __LOCALIZE("LUFS", "sws_loudness"));
 					step = strlen("$lureference");
 				}
 				else if ((foundWildcard = !strncmp(format, "$maxmomentaryposproj", strlen("$maxmomentaryposproj"))))
@@ -2775,7 +2943,7 @@ WDL_FastString BR_AnalyzeLoudnessWnd::CreateExportString (bool previewOnly)
 	return returnString;
 }
 
-WDL_DLGRET BR_AnalyzeLoudnessWnd::ExportFormatDialogProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+WDL_DLGRET NF_AnalyzeLoudnessWnd::ExportFormatDialogProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 	if (INT_PTR r = SNM_HookThemeColorsMessage(hwnd, uMsg, wParam, lParam))
 		return r;
@@ -2787,7 +2955,7 @@ WDL_DLGRET BR_AnalyzeLoudnessWnd::ExportFormatDialogProc (HWND hwnd, UINT uMsg, 
 	{
 		case WM_INITDIALOG:
 		{
-			s_originalFormat.Set(g_loudnessWndManager.Get()->m_properties.exportFormat.Get());
+			s_originalFormat.Set(g_NFloudnessWndManager.Get()->m_properties.exportFormat.Get());
 
 			AttachWindowResizeGrip(hwnd);
 			s_resize.init(hwnd);
@@ -2835,7 +3003,7 @@ WDL_DLGRET BR_AnalyzeLoudnessWnd::ExportFormatDialogProc (HWND hwnd, UINT uMsg, 
 					}
 
 					helpString.Append(string.Get());
-					helpString.Append(__localizeFunc(g_wildcards[i].desc, "sws_DLG_180", 0));
+					helpString.Append(g_wildcards[i].desc);
 					helpString.Append("\r\n");
 				}
 			#else
@@ -2845,14 +3013,14 @@ WDL_DLGRET BR_AnalyzeLoudnessWnd::ExportFormatDialogProc (HWND hwnd, UINT uMsg, 
 					helpString.Append(g_wildcards[i].wildcard);
 					for (int j = 0; j < g_wildcards[i].osxTabs; ++j)
 						helpString.Append("\t");
-					helpString.Append(__localizeFunc(g_wildcards[i].desc, "sws_DLG_180", 0));
+					helpString.Append(g_wildcards[i].desc);
 					helpString.Append("\r\n");
 				}
 			#endif
 
 			SetWindowText(GetDlgItem(hwnd, IDC_EDIT), helpString.Get());
-			SetWindowText(GetDlgItem(hwnd, IDC_FORMAT), g_loudnessWndManager.Get()->m_properties.exportFormat.Get());
-			SendMessage(hwnd, WM_COMMAND, BR_AnalyzeLoudnessWnd::UPDATE_FORMAT_AND_PREVIEW, 0);
+			SetWindowText(GetDlgItem(hwnd, IDC_FORMAT), g_NFloudnessWndManager.Get()->m_properties.exportFormat.Get());
+			SendMessage(hwnd, WM_COMMAND, NF_AnalyzeLoudnessWnd::UPDATE_FORMAT_AND_PREVIEW, 0);
 
 			RestoreWindowPos(hwnd, EXPORT_FORMAT_WND, true);
 			ShowWindow(hwnd, SW_SHOW);
@@ -2864,13 +3032,13 @@ WDL_DLGRET BR_AnalyzeLoudnessWnd::ExportFormatDialogProc (HWND hwnd, UINT uMsg, 
 		{
 			switch(LOWORD(wParam))
 			{
-				case BR_AnalyzeLoudnessWnd::UPDATE_FORMAT_AND_PREVIEW:
+				case NF_AnalyzeLoudnessWnd::UPDATE_FORMAT_AND_PREVIEW:
 				{
 					char format[2048];
 					GetDlgItemText(hwnd, IDC_FORMAT, format, sizeof(format));
-					g_loudnessWndManager.Get()->m_properties.exportFormat.Set(format);
+					g_NFloudnessWndManager.Get()->m_properties.exportFormat.Set(format);
 
-					WDL_FastString previewString = g_loudnessWndManager.Get()->CreateExportString(true);
+					WDL_FastString previewString = g_NFloudnessWndManager.Get()->CreateExportString(true);
 					SetDlgItemText(hwnd, IDC_PREVIEW, previewString.Get());
 				}
 				break;
@@ -2888,7 +3056,7 @@ WDL_DLGRET BR_AnalyzeLoudnessWnd::ExportFormatDialogProc (HWND hwnd, UINT uMsg, 
 				case IDC_FORMAT:
 				{
 					if (HIWORD(wParam) == EN_CHANGE && GetFocus() == GetDlgItem(hwnd, IDC_FORMAT))
-						SendMessage(hwnd, WM_COMMAND, BR_AnalyzeLoudnessWnd::UPDATE_FORMAT_AND_PREVIEW, 0);
+						SendMessage(hwnd, WM_COMMAND, NF_AnalyzeLoudnessWnd::UPDATE_FORMAT_AND_PREVIEW, 0);
 				}
 				break;
 
@@ -2897,16 +3065,16 @@ WDL_DLGRET BR_AnalyzeLoudnessWnd::ExportFormatDialogProc (HWND hwnd, UINT uMsg, 
 					char format[2048];
 					GetDlgItemText(hwnd, IDC_FORMAT, format, sizeof(format));
 					s_originalFormat.Set(format);
-					g_loudnessWndManager.Get()->SaveRecentFormatPattern(s_originalFormat);
+					g_NFloudnessWndManager.Get()->SaveRecentFormatPattern(s_originalFormat);
 
-					g_loudnessWndManager.Get()->ShowExportFormatDialog(false);
+					g_NFloudnessWndManager.Get()->ShowExportFormatDialog(false);
 				}
 				break;
 
 				case IDCANCEL:
 				{
-					g_loudnessWndManager.Get()->m_properties.exportFormat.Set(s_originalFormat.Get());
-					g_loudnessWndManager.Get()->ShowExportFormatDialog(false);
+					g_NFloudnessWndManager.Get()->m_properties.exportFormat.Set(s_originalFormat.Get());
+					g_NFloudnessWndManager.Get()->ShowExportFormatDialog(false);
 				}
 				break;
 			}
@@ -2953,7 +3121,7 @@ WDL_DLGRET BR_AnalyzeLoudnessWnd::ExportFormatDialogProc (HWND hwnd, UINT uMsg, 
 				HMENU menuRecent = CreatePopupMenu();
 				while (true)
 				{
-					WDL_FastString pattern = g_loudnessWndManager.Get()->GetRecentFormatPattern(i - firstRecent);
+					WDL_FastString pattern = g_NFloudnessWndManager.Get()->GetRecentFormatPattern(i - firstRecent);
 					if (pattern.GetLength())
 						AddToMenu(menuRecent, pattern.Get(), i, -1, false);
 					else
@@ -2983,12 +3151,12 @@ WDL_DLGRET BR_AnalyzeLoudnessWnd::ExportFormatDialogProc (HWND hwnd, UINT uMsg, 
 					}
 					else
 					{
-						WDL_FastString newFormat = g_loudnessWndManager.Get()->GetRecentFormatPattern(wildcard - firstRecent);
+						WDL_FastString newFormat = g_NFloudnessWndManager.Get()->GetRecentFormatPattern(wildcard - firstRecent);
 						SetDlgItemText(hwnd, IDC_FORMAT, newFormat.Get());
 						SendMessage(GetDlgItem(hwnd, IDC_FORMAT), EM_SETSEL, newFormat.GetLength(), newFormat.GetLength());
 					}
 
-					SendMessage(hwnd, WM_COMMAND, BR_AnalyzeLoudnessWnd::UPDATE_FORMAT_AND_PREVIEW, 0);
+					SendMessage(hwnd, WM_COMMAND, NF_AnalyzeLoudnessWnd::UPDATE_FORMAT_AND_PREVIEW, 0);
 					SetFocus(GetDlgItem(hwnd, IDC_FORMAT));
 				}
 
@@ -2999,7 +3167,7 @@ WDL_DLGRET BR_AnalyzeLoudnessWnd::ExportFormatDialogProc (HWND hwnd, UINT uMsg, 
 
 		case WM_DESTROY:
 		{
-			g_loudnessWndManager.Get()->m_properties.exportFormat.Set(s_originalFormat.Get());
+			g_NFloudnessWndManager.Get()->m_properties.exportFormat.Set(s_originalFormat.Get());
 
 			s_resize.init(NULL);
 			s_originalFormat.SetLen(0, true);
@@ -3010,7 +3178,7 @@ WDL_DLGRET BR_AnalyzeLoudnessWnd::ExportFormatDialogProc (HWND hwnd, UINT uMsg, 
 	return 0;
 }
 
-WDL_DLGRET BR_AnalyzeLoudnessWnd::NormalizeDialogProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+WDL_DLGRET NF_AnalyzeLoudnessWnd::NormalizeDialogProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 	if (INT_PTR r = SNM_HookThemeColorsMessage(hwnd, uMsg, wParam, lParam))
 		return r;
@@ -3031,7 +3199,7 @@ WDL_DLGRET BR_AnalyzeLoudnessWnd::NormalizeDialogProc (HWND hwnd, UINT uMsg, WPA
 			// Set controls
 			WDL_UTF8_HookComboBox(GetDlgItem(hwnd, IDC_UNIT));
 			SendDlgItemMessage(hwnd, IDC_UNIT, CB_ADDSTRING, 0, (LPARAM)__LOCALIZE("LUFS", "sws_loudness"));
-			SendDlgItemMessage(hwnd, IDC_UNIT, CB_ADDSTRING, 0, (LPARAM)g_pref.GetFormatedLUString().Get());
+			SendDlgItemMessage(hwnd, IDC_UNIT, CB_ADDSTRING, 0, (LPARAM)g_NFpref.GetFormatedLUString().Get());
 			SendDlgItemMessage(hwnd, IDC_UNIT, CB_SETCURSEL, unit, 0);
 			_snprintfSafe(tmp, sizeof(tmp), "%.6g", value); SetDlgItemText(hwnd, IDC_VALUE, tmp);
 			SetFocus(GetDlgItem(hwnd, IDC_VALUE));
@@ -3047,11 +3215,11 @@ WDL_DLGRET BR_AnalyzeLoudnessWnd::NormalizeDialogProc (HWND hwnd, UINT uMsg, WPA
 		{
 			switch(LOWORD(wParam))
 			{
-				case BR_AnalyzeLoudnessWnd::READ_PROJDATA:
+				case NF_AnalyzeLoudnessWnd::READ_PROJDATA:
 				{
 					int unit = (int)SendDlgItemMessage(hwnd, IDC_UNIT, CB_GETCURSEL, 0, 0);
 					SendDlgItemMessage(hwnd, IDC_UNIT, CB_DELETESTRING, 1, 0);
-					SendDlgItemMessage(hwnd, IDC_UNIT, CB_ADDSTRING, 0, (LPARAM)g_pref.GetFormatedLUString().Get());
+					SendDlgItemMessage(hwnd, IDC_UNIT, CB_ADDSTRING, 0, (LPARAM)g_NFpref.GetFormatedLUString().Get());
 					SendDlgItemMessage(hwnd, IDC_UNIT, CB_SETCURSEL, unit, 0);
 				}
 				break;
@@ -3063,7 +3231,7 @@ WDL_DLGRET BR_AnalyzeLoudnessWnd::NormalizeDialogProc (HWND hwnd, UINT uMsg, WPA
 						int unit = (int)SendDlgItemMessage(hwnd, IDC_UNIT, CB_GETCURSEL, 0, 0);
 						char value[256]; GetDlgItemText(hwnd, IDC_VALUE, value, sizeof(value));
 
-						_snprintfSafe(value, sizeof(value), "%.6g", (unit == 1) ? g_pref.LUFStoLU(AltAtof(value)) : g_pref.LUtoLUFS(AltAtof(value)));
+						_snprintfSafe(value, sizeof(value), "%.6g", (unit == 1) ? g_NFpref.LUFStoLU(AltAtof(value)) : g_NFpref.LUtoLUFS(AltAtof(value)));
 						SetDlgItemText(hwnd, IDC_VALUE, value);
 					}
 				}
@@ -3071,17 +3239,17 @@ WDL_DLGRET BR_AnalyzeLoudnessWnd::NormalizeDialogProc (HWND hwnd, UINT uMsg, WPA
 
 				case IDOK:
 				{
-					BR_AnalyzeLoudnessWnd* dialog = g_loudnessWndManager.Get();
+					NF_AnalyzeLoudnessWnd* dialog = g_NFloudnessWndManager.Get();
 
-					WDL_PtrList<BR_LoudnessObject> itemsToNormalize;
+					WDL_PtrList<NF_LoudnessObject> itemsToNormalize;
 					int x = 0;
-					while (BR_LoudnessObject* listItem = (BR_LoudnessObject*)dialog->m_list->EnumSelected(&x))
+					while (NF_LoudnessObject* listItem = (NF_LoudnessObject*)dialog->m_list->EnumSelected(&x))
 						itemsToNormalize.Add(listItem);
-					BR_NormalizeData normalizeData = {&itemsToNormalize, 0, false, false};
+					NF_NormalizeData normalizeData = {&itemsToNormalize, 0, false, false};
 
 					int unit = (int)SendDlgItemMessage(hwnd, IDC_UNIT, CB_GETCURSEL, 0, 0);
 					char value[256]; GetDlgItemText(hwnd, IDC_VALUE, value, sizeof(value));
-					normalizeData.targetLufs = (unit == 0) ? AltAtof(value) : g_pref.LUtoLUFS(AltAtof(value));
+					normalizeData.targetLufs = (unit == 0) ? AltAtof(value) : g_NFpref.LUtoLUFS(AltAtof(value));
 
 					if (itemsToNormalize.GetSize())
 					{
@@ -3100,7 +3268,7 @@ WDL_DLGRET BR_AnalyzeLoudnessWnd::NormalizeDialogProc (HWND hwnd, UINT uMsg, WPA
 
 				case IDCANCEL:
 				{
-					g_loudnessWndManager.Get()->ShowNormalizeDialog(false);
+					g_NFloudnessWndManager.Get()->ShowNormalizeDialog(false);
 				}
 				break;
 			}
@@ -3130,7 +3298,7 @@ WDL_DLGRET BR_AnalyzeLoudnessWnd::NormalizeDialogProc (HWND hwnd, UINT uMsg, WPA
 	return 0;
 }
 
-void BR_AnalyzeLoudnessWnd::OnInitDlg ()
+void NF_AnalyzeLoudnessWnd::OnInitDlg ()
 {
 	m_parentVwnd.SetRealParent(m_hwnd);
 	m_vwnd_painter.SetGSC(WDL_STYLE_GetSysColor);
@@ -3144,7 +3312,7 @@ void BR_AnalyzeLoudnessWnd::OnInitDlg ()
 	m_resize.init_item(IDC_OPTIONS, 1.0, 1.0, 1.0, 1.0);
 	ShowWindow(GetDlgItem(m_hwnd, IDC_PROGRESS), SW_HIDE);
 
-	m_list = new BR_AnalyzeLoudnessView(GetDlgItem(m_hwnd, IDC_LIST), GetDlgItem(m_hwnd, IDC_EDIT));
+	m_list = new NF_AnalyzeLoudnessView(GetDlgItem(m_hwnd, IDC_LIST), GetDlgItem(m_hwnd, IDC_EDIT));
 	m_pLists.Add(m_list);
 	SetTimer(m_hwnd, UPDATE_TIMER, UPDATE_TIMER_FREQ, NULL);
 
@@ -3153,7 +3321,7 @@ void BR_AnalyzeLoudnessWnd::OnInitDlg ()
 	this->Update();
 }
 
-void BR_AnalyzeLoudnessWnd::OnCommand (WPARAM wParam, LPARAM lParam)
+void NF_AnalyzeLoudnessWnd::OnCommand (WPARAM wParam, LPARAM lParam)
 {
 	switch (LOWORD(wParam))
 	{
@@ -3178,19 +3346,19 @@ void BR_AnalyzeLoudnessWnd::OnCommand (WPARAM wParam, LPARAM lParam)
 				// Can't analyze master for now (accessor doesn't take receives into account) but leave in case this changes
 				if (*(int*)GetSetMediaTrackInfo(GetMasterTrack(NULL), "I_SELECTED", NULL))
 				{
-					if (BR_LoudnessObject* object = this->IsObjectInList(GetMasterTrack(NULL)))
+					if (NF_LoudnessObject* object = this->IsObjectInList(GetMasterTrack(NULL)))
 						m_analyzeQueue.Add(object);
 					if (m_properties.clearAnalyzed)
-						m_analyzeQueue.Add(new BR_LoudnessObject(GetMasterTrack(NULL)));
+						m_analyzeQueue.Add(new NF_LoudnessObject(GetMasterTrack(NULL)));
 				}
 
 				const int cnt=CountSelectedTracks(NULL);
 				for (int i = 0; i < cnt; ++i)
 				{
-					if (BR_LoudnessObject* object = this->IsObjectInList(GetSelectedTrack(NULL, i)))
+					if (NF_LoudnessObject* object = this->IsObjectInList(GetSelectedTrack(NULL, i)))
 						m_analyzeQueue.Add(object);
 					else
-						m_analyzeQueue.Add(new BR_LoudnessObject(GetSelectedTrack(NULL, i)));
+						m_analyzeQueue.Add(new NF_LoudnessObject(GetSelectedTrack(NULL, i)));
 				}
 			}
 			else
@@ -3200,10 +3368,10 @@ void BR_AnalyzeLoudnessWnd::OnCommand (WPARAM wParam, LPARAM lParam)
 				{
 					if (MediaItem_Take* take = GetActiveTake(GetSelectedMediaItem(NULL, i)))
 					{
-						if (BR_LoudnessObject* object = this->IsObjectInList(take))
+						if (NF_LoudnessObject* object = this->IsObjectInList(take))
 							m_analyzeQueue.Add(object);
 						else
-							m_analyzeQueue.Add(new BR_LoudnessObject(take));
+							m_analyzeQueue.Add(new NF_LoudnessObject(take));
 					}
 				}
 			}
@@ -3232,7 +3400,7 @@ void BR_AnalyzeLoudnessWnd::OnCommand (WPARAM wParam, LPARAM lParam)
 			this->Update();
 
 			int x = 0;
-			while (BR_LoudnessObject* listItem = (BR_LoudnessObject*)m_list->EnumSelected(&x))
+			while (NF_LoudnessObject* listItem = (NF_LoudnessObject*)m_list->EnumSelected(&x))
 				m_reanalyzeQueue.Add(listItem);
 
 			if (m_reanalyzeQueue.GetSize())
@@ -3258,13 +3426,13 @@ void BR_AnalyzeLoudnessWnd::OnCommand (WPARAM wParam, LPARAM lParam)
 		case NORMALIZE_TO_23:
 		case NORMALIZE_TO_0LU:
 		{
-			WDL_PtrList<BR_LoudnessObject> itemsToNormalize;
+			WDL_PtrList<NF_LoudnessObject> itemsToNormalize;
 			int x = 0;
-			while (BR_LoudnessObject* listItem = (BR_LoudnessObject*)m_list->EnumSelected(&x))
+			while (NF_LoudnessObject* listItem = (NF_LoudnessObject*)m_list->EnumSelected(&x))
 				itemsToNormalize.Add(listItem);
 
-			BR_NormalizeData normalizeData = {&itemsToNormalize, 0, false, false};
-			normalizeData.targetLufs = (wParam == NORMALIZE_TO_23) ? -23 : g_pref.LUtoLUFS(0);
+			NF_NormalizeData normalizeData = {&itemsToNormalize, 0, false, false};
+			normalizeData.targetLufs = (wParam == NORMALIZE_TO_23) ? -23 : g_NFpref.LUtoLUFS(0);
 
 			if (itemsToNormalize.GetSize())
 			{
@@ -3299,9 +3467,9 @@ void BR_AnalyzeLoudnessWnd::OnCommand (WPARAM wParam, LPARAM lParam)
 
 				bool update = false;
 				int x = 0;
-				while (BR_LoudnessObject* listItem = (BR_LoudnessObject*)m_list->EnumSelected(&x))
+				while (NF_LoudnessObject* listItem = (NF_LoudnessObject*)m_list->EnumSelected(&x))
 				{
-					if (listItem->CreateGraph(envelope, g_pref.GetGraphMin(), g_pref.GetGraphMax(), (wParam == DRAW_MOMENTARY) ? (true) : (false), m_hwnd))
+					if (listItem->CreateGraph(envelope, g_NFpref.GetGraphMin(), g_NFpref.GetGraphMax(), (wParam == DRAW_MOMENTARY) ? (true) : (false), m_hwnd))
 						update = true;
 				}
 
@@ -3314,14 +3482,14 @@ void BR_AnalyzeLoudnessWnd::OnCommand (WPARAM wParam, LPARAM lParam)
 		case DELETE_ITEM:
 		{
 			int x = 0;
-			while (BR_LoudnessObject* listItem = (BR_LoudnessObject*)m_list->EnumSelected(&x))
+			while (NF_LoudnessObject* listItem = (NF_LoudnessObject*)m_list->EnumSelected(&x))
 			{
 				m_reanalyzeQueue.Delete(m_reanalyzeQueue.Find(listItem), false);
 				m_analyzeQueue.Delete(m_analyzeQueue.Find(listItem), true);
 
-				int id = g_analyzedObjects.Get()->Find(listItem);
+				int id = g_NFanalyzedObjects.Get()->Find(listItem);
 				if (id >= 0)
-					g_analyzedObjects.Get()->Delete(id, true);
+					g_NFanalyzedObjects.Get()->Delete(id, true);
 			}
 			this->Update();
 		}
@@ -3383,14 +3551,6 @@ void BR_AnalyzeLoudnessWnd::OnCommand (WPARAM wParam, LPARAM lParam)
 		}
 		break;
 
-		case SET_DO_HIGH_PRECISION_MODE:
-		{
-			m_properties.doHighPrecisionMode = !m_properties.doHighPrecisionMode;
-			this->ClearList(); // NF: force reanalyzing, as max. momentary values potentially change
-			RefreshToolbar(NamedCommandLookup("_BR_NF_TOGGLE_LOUDNESS_HIGH_PREC"));
-		}
-		break;
-
 		case SET_UNIT_LUFS:
 		{
 			m_properties.usingLU = false;
@@ -3407,8 +3567,8 @@ void BR_AnalyzeLoudnessWnd::OnCommand (WPARAM wParam, LPARAM lParam)
 
 		case OPEN_GLOBAL_PREFERENCES:
 		{
-			if (!g_pref.IsPreferenceDlgVisible())
-				ToggleLoudnessPref(NULL); // do it like this to refresh toolbar buttons
+			if (!g_NFpref.IsPreferenceDlgVisible())
+				NF_ToggleLoudnessPref(NULL); // do it like this to refresh toolbar buttons
 		}
 		break;
 
@@ -3510,21 +3670,21 @@ void BR_AnalyzeLoudnessWnd::OnCommand (WPARAM wParam, LPARAM lParam)
 
 		case GO_TO_SHORTTERM:
 		{
-			if (BR_LoudnessObject* listItem = (BR_LoudnessObject*)m_list->EnumSelected(NULL))
+			if (NF_LoudnessObject* listItem = (NF_LoudnessObject*)m_list->EnumSelected(NULL))
 				listItem->GoToShortTermMax(this->m_properties.timeSelOverMax);
 		}
 		break;
 
 		case GO_TO_MOMENTARY:
 		{
-			if (BR_LoudnessObject* listItem = (BR_LoudnessObject*)m_list->EnumSelected(NULL))
+			if (NF_LoudnessObject* listItem = (NF_LoudnessObject*)m_list->EnumSelected(NULL))
 				listItem->GoToMomentaryMax(this->m_properties.timeSelOverMax);
 		}
 		break;
 
 		case GO_TO_TRUE_PEAK:
 		{
-			if (BR_LoudnessObject* listItem = (BR_LoudnessObject*)m_list->EnumSelected(NULL))
+			if (NF_LoudnessObject* listItem = (NF_LoudnessObject*)m_list->EnumSelected(NULL))
 				listItem->GoToTruePeak();
 		}
 
@@ -3538,9 +3698,9 @@ void BR_AnalyzeLoudnessWnd::OnCommand (WPARAM wParam, LPARAM lParam)
 	}
 }
 
-void BR_AnalyzeLoudnessWnd::OnTimer (WPARAM wParam)
+void NF_AnalyzeLoudnessWnd::OnTimer (WPARAM wParam)
 {
-	static BR_LoudnessObject* s_currentObject      = NULL;
+	static NF_LoudnessObject* s_currentObject      = NULL;
 	static double             s_currentObjectLen   = 0;
 	static double             s_finishedObjectsLen = 0;
 
@@ -3555,12 +3715,12 @@ void BR_AnalyzeLoudnessWnd::OnTimer (WPARAM wParam)
 			if (!m_analyzeQueue.GetSize())
 			{
 				// Make sure list view isn't populated with invalid items (i.e. user could have deleted them during analysis)
-				for (int i = 0; i < g_analyzedObjects.Get()->GetSize(); ++i)
+				for (int i = 0; i < g_NFanalyzedObjects.Get()->GetSize(); ++i)
 				{
-					if (BR_LoudnessObject* object = g_analyzedObjects.Get()->Get(i))
+					if (NF_LoudnessObject* object = g_NFanalyzedObjects.Get()->Get(i))
 					{
 						if (!object->IsTargetValid())
-							g_analyzedObjects.Get()->Delete(i--, true);
+							g_NFanalyzedObjects.Get()->Delete(i--, true);
 					}
 				}
 
@@ -3574,7 +3734,7 @@ void BR_AnalyzeLoudnessWnd::OnTimer (WPARAM wParam)
 				if ((s_currentObject = m_analyzeQueue.Get(0)))
 				{
 					s_currentObjectLen = s_currentObject->GetAudioLength();
-					s_currentObject->Analyze(false, m_properties.doTruePeak, m_properties.doHighPrecisionMode);
+					s_currentObject->Analyze(false, m_properties.doTruePeak);
 					m_analyzeInProgress = true;
 				}
 				else
@@ -3593,8 +3753,8 @@ void BR_AnalyzeLoudnessWnd::OnTimer (WPARAM wParam)
 				if (m_analyzeQueue.Find(s_currentObject) != -1)
 				{
 					// Sometimes the analyzed object can already be in the list (if option to clear list upon analyzing is disabled)
-					if (g_analyzedObjects.Get()->Find(s_currentObject) == -1)
-						g_analyzedObjects.Get()->Add(s_currentObject);
+					if (g_NFanalyzedObjects.Get()->Find(s_currentObject) == -1)
+						g_NFanalyzedObjects.Get()->Add(s_currentObject);
 					m_analyzeQueue.Delete(m_analyzeQueue.Find(s_currentObject), false);
 					this->Update();
 				}
@@ -3626,7 +3786,7 @@ void BR_AnalyzeLoudnessWnd::OnTimer (WPARAM wParam)
 				if ((s_currentObject = m_reanalyzeQueue.Get(0)))
 				{
 					s_currentObjectLen = s_currentObject->GetAudioLength();
-					s_currentObject->Analyze(false, m_properties.doTruePeak, m_properties.doHighPrecisionMode);
+					s_currentObject->Analyze(false, m_properties.doTruePeak);
 					m_analyzeInProgress = true;
 				}
 				else
@@ -3663,7 +3823,7 @@ void BR_AnalyzeLoudnessWnd::OnTimer (WPARAM wParam)
 			bool update = false;
 			for (int i = 0; i < ListView_GetItemCount(hwnd); ++i)
 			{
-				if (BR_LoudnessObject* listItem = (BR_LoudnessObject*)m_list->GetListItem(i))
+				if (NF_LoudnessObject* listItem = (NF_LoudnessObject*)m_list->GetListItem(i))
 				{
 					if (listItem->IsTargetValid())
 					{
@@ -3698,8 +3858,8 @@ void BR_AnalyzeLoudnessWnd::OnTimer (WPARAM wParam)
 						m_reanalyzeQueue.Delete(m_reanalyzeQueue.Find(listItem), false);
 						m_analyzeQueue.Delete(m_analyzeQueue.Find(listItem), true);
 
-						int id = g_analyzedObjects.Get()->Find(listItem);
-						g_analyzedObjects.Get()->Delete(id, true);
+						int id = g_NFanalyzedObjects.Get()->Find(listItem);
+						g_NFanalyzedObjects.Get()->Delete(id, true);
 						update = true;
 					}
 				}
@@ -3710,7 +3870,7 @@ void BR_AnalyzeLoudnessWnd::OnTimer (WPARAM wParam)
 	}
 }
 
-void BR_AnalyzeLoudnessWnd::OnDestroy ()
+void NF_AnalyzeLoudnessWnd::OnDestroy ()
 {
 	this->AbortAnalyze();
 	this->AbortReanalyze();
@@ -3718,13 +3878,13 @@ void BR_AnalyzeLoudnessWnd::OnDestroy ()
 	KillTimer(m_hwnd, UPDATE_TIMER);
 }
 
-void BR_AnalyzeLoudnessWnd::GetMinSize (int* w, int* h)
+void NF_AnalyzeLoudnessWnd::GetMinSize (int* w, int* h)
 {
 	WritePtr(w, 327);
 	WritePtr(h, 160);
 }
 
-int BR_AnalyzeLoudnessWnd::OnKey (MSG* msg, int iKeyState)
+int NF_AnalyzeLoudnessWnd::OnKey (MSG* msg, int iKeyState)
 {
 	if (msg->message == WM_KEYDOWN && msg->wParam == VK_DELETE && !iKeyState)
 	{
@@ -3734,20 +3894,20 @@ int BR_AnalyzeLoudnessWnd::OnKey (MSG* msg, int iKeyState)
 	return 0;
 }
 
-HMENU BR_AnalyzeLoudnessWnd::OnContextMenu (int x, int y, bool* wantDefaultItems)
+HMENU NF_AnalyzeLoudnessWnd::OnContextMenu (int x, int y, bool* wantDefaultItems)
 {
 	HMENU menu = CreatePopupMenu();
 
 	int column;
-	if ((BR_LoudnessObject*)m_list->GetHitItem(x, y, &column))
+	if ((NF_LoudnessObject*)m_list->GetHitItem(x, y, &column))
 	{
 		WritePtr(wantDefaultItems, false);
 		if (m_properties.usingLU)
 		{
 			char menuEntry[512];
-			WDL_FastString unit = g_pref.GetFormatedLUString();
+			WDL_FastString unit = g_NFpref.GetFormatedLUString();
 			if (!strcmp(unit.Get(), __LOCALIZE("LU", "sws_loudness")))
-				_snprintfSafe(menuEntry, sizeof(menuEntry), __LOCALIZE_VERFMT("Normalize to 0 %s (%g LUFS)", "sws_DLG_174"), unit.Get(), g_pref.LUtoLUFS(0));
+				_snprintfSafe(menuEntry, sizeof(menuEntry), __LOCALIZE_VERFMT("Normalize to 0 %s (%g LUFS)", "sws_DLG_174"), unit.Get(), g_NFpref.LUtoLUFS(0));
 			else
 				_snprintfSafe(menuEntry, sizeof(menuEntry), __LOCALIZE_VERFMT("Normalize to 0 %s", "sws_DLG_174"), unit.Get());
 			AddToMenu(menu, menuEntry, NORMALIZE_TO_0LU, -1, false);
@@ -3764,8 +3924,8 @@ HMENU BR_AnalyzeLoudnessWnd::OnContextMenu (int x, int y, bool* wantDefaultItems
 
 		AddToMenu(menu, SWS_SEPARATOR, 0);
 		WDL_FastString shortTermGraph, momentaryGraph;
-		shortTermGraph.AppendFormatted(256, __LOCALIZE_VERFMT("Create short-term graph in selected envelope (%g to %g LUFS)", "sws_DLG_174"), g_pref.GetGraphMin(), g_pref.GetGraphMax());
-		momentaryGraph.AppendFormatted(256, __LOCALIZE_VERFMT("Create momentary graph in selected envelope  (%g to %g LUFS)", "sws_DLG_174"), g_pref.GetGraphMin(), g_pref.GetGraphMax());
+		shortTermGraph.AppendFormatted(256, __LOCALIZE_VERFMT("Create short-term graph in selected envelope (%g to %g LUFS)", "sws_DLG_174"), g_NFpref.GetGraphMin(), g_NFpref.GetGraphMax());
+		momentaryGraph.AppendFormatted(256, __LOCALIZE_VERFMT("Create momentary graph in selected envelope  (%g to %g LUFS)", "sws_DLG_174"), g_NFpref.GetGraphMin(), g_NFpref.GetGraphMax());
 		AddToMenu(menu, shortTermGraph.Get(), DRAW_SHORTTERM, -1, false);
 		AddToMenu(menu, momentaryGraph.Get(), DRAW_MOMENTARY, -1, false);
 
@@ -3793,10 +3953,9 @@ HMENU BR_AnalyzeLoudnessWnd::OnContextMenu (int x, int y, bool* wantDefaultItems
 		HMENU optionsMenu = button ? NULL : CreatePopupMenu();
 		HMENU unitMenu = CreatePopupMenu();
 		AddToMenu(unitMenu, __LOCALIZE("LUFS", "sws_loudness"), SET_UNIT_LUFS, -1, false, !m_properties.usingLU ?  MF_CHECKED : MF_UNCHECKED);
-		AddToMenu(unitMenu, g_pref.GetFormatedLUString().Get(), SET_UNIT_LU, -1, false, m_properties.usingLU ?  MF_CHECKED : MF_UNCHECKED);
+		AddToMenu(unitMenu, g_NFpref.GetFormatedLUString().Get(), SET_UNIT_LU, -1, false, m_properties.usingLU ?  MF_CHECKED : MF_UNCHECKED);
 
 		AddToMenu((button ? menu : optionsMenu), __LOCALIZE("Measure true peak (slower)", "sws_DLG_174"), SET_DO_TRUE_PEAK, -1, false, m_properties.doTruePeak ?  MF_CHECKED : MF_UNCHECKED);
-		AddToMenu((button ? menu : optionsMenu), __LOCALIZE("Use high precision mode (slower)", "sws_DLG_174"), SET_DO_HIGH_PRECISION_MODE, -1, false, m_properties.doHighPrecisionMode ? MF_CHECKED : MF_UNCHECKED);
 		AddToMenu((button ? menu : optionsMenu), __LOCALIZE("Analyze after normalizing", "sws_DLG_174"), SET_ANALYZE_ON_NORMALIZE, -1, false, m_properties.analyzeOnNormalize ?  MF_CHECKED : MF_UNCHECKED);
 		AddToMenu((button ? menu : optionsMenu), __LOCALIZE("Clear list when analyzing", "sws_DLG_174"), SET_CLEAR_ON_ANALYZE, -1, false, m_properties.clearAnalyzed ?  MF_CHECKED : MF_UNCHECKED);
 		AddToMenu((button ? menu : optionsMenu), __LOCALIZE("Clear envelope when creating loudness graph", "sws_DLG_174"), SET_CLEAR_ENVELOPE, -1, false, m_properties.clearEnvelope ?  MF_CHECKED : MF_UNCHECKED);
@@ -3820,12 +3979,12 @@ HMENU BR_AnalyzeLoudnessWnd::OnContextMenu (int x, int y, bool* wantDefaultItems
 	return menu;
 }
 
-bool BR_AnalyzeLoudnessWnd::ReprocessContextMenu ()
+bool NF_AnalyzeLoudnessWnd::ReprocessContextMenu ()
 {
 	return false;
 }
 
-INT_PTR BR_AnalyzeLoudnessWnd::OnUnhandledMsg(UINT uMsg, WPARAM wParam, LPARAM lParam)
+INT_PTR NF_AnalyzeLoudnessWnd::OnUnhandledMsg(UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 	if (uMsg == WM_SHOWWINDOW)
 	{
@@ -3841,7 +4000,7 @@ INT_PTR BR_AnalyzeLoudnessWnd::OnUnhandledMsg(UINT uMsg, WPARAM wParam, LPARAM l
 	return 0;
 }
 
-BR_AnalyzeLoudnessWnd::Properties::Properties () :
+NF_AnalyzeLoudnessWnd::Properties::Properties () :
 analyzeTracks         (false),
 analyzeOnNormalize    (true),
 mirrorProjSelection   (true),
@@ -3850,12 +4009,11 @@ timeSelOverMax        (false),
 clearEnvelope         (true),
 clearAnalyzed         (true),
 doTruePeak            (true),
-usingLU               (false),
-doHighPrecisionMode   (true)
+usingLU               (false)
 {
 }
 
-void BR_AnalyzeLoudnessWnd::Properties::Load ()
+void NF_AnalyzeLoudnessWnd::Properties::Load ()
 {
 	char tmp[2048];
 	GetPrivateProfileString("SWS", LOUDNESS_KEY, "", tmp, sizeof(tmp), get_ini_file());
@@ -3871,13 +4029,12 @@ void BR_AnalyzeLoudnessWnd::Properties::Load ()
 	clearAnalyzed         = (lp.getnumtokens() > 6) ? !!lp.gettoken_int(6) : true;
 	doTruePeak            = (lp.getnumtokens() > 7) ? !!lp.gettoken_int(7) : false;
 	usingLU               = (lp.getnumtokens() > 8) ? !!lp.gettoken_int(8) : false;
-	doHighPrecisionMode   = (lp.getnumtokens() > 9) ? !!lp.gettoken_int(9) : false;
 
 	GetPrivateProfileString("SWS", EXPORT_FORMAT_KEY, "$id - $target: $integrated, Range: $range, True peak: $truepeak", tmp, sizeof(tmp), get_ini_file());
 	exportFormat.Set(tmp);
 }
 
-void BR_AnalyzeLoudnessWnd::Properties::Save ()
+void NF_AnalyzeLoudnessWnd::Properties::Save ()
 {
 	int analyzeTracksInt         = analyzeTracks;
 	int analyzeOnNormalizeInt    = analyzeOnNormalize;
@@ -3888,10 +4045,9 @@ void BR_AnalyzeLoudnessWnd::Properties::Save ()
 	int clearAnalyzedInt         = clearAnalyzed;
 	int doTruePeakInt            = doTruePeak;
 	int usingLUInt               = usingLU;
-	int doHighPrecisionModeInt   = doHighPrecisionMode;
 
 	char tmp[512];
-	_snprintfSafe(tmp, sizeof(tmp), "%d %d %d %d %d %d %d %d %d %d", analyzeTracksInt, analyzeOnNormalizeInt, mirrorProjSelectionInt, doubleClickGoToTargetInt, timeSelOverMaxInt, clearEnvelopeInt, clearAnalyzedInt, doTruePeakInt, usingLUInt, doHighPrecisionModeInt);
+	_snprintfSafe(tmp, sizeof(tmp), "%d %d %d %d %d %d %d %d %d", analyzeTracksInt, analyzeOnNormalizeInt, mirrorProjSelectionInt, doubleClickGoToTargetInt, timeSelOverMaxInt, clearEnvelopeInt, clearAnalyzedInt, doTruePeakInt, usingLUInt);
 	WritePrivateProfileString("SWS", LOUDNESS_KEY, tmp, get_ini_file());
 
 	WritePrivateProfileString("SWS", EXPORT_FORMAT_KEY, exportFormat.Get(), get_ini_file());
@@ -3900,39 +4056,114 @@ void BR_AnalyzeLoudnessWnd::Properties::Save ()
 /******************************************************************************
 * Loudness init/exit                                                          *
 ******************************************************************************/
-int LoudnessInitExit (bool init)
+int NF_DialogueLoudness::LoudnessInitExit (bool init) // called from nofish_Init()
 {
 	static project_config_extension_t s_projectconfig = {ProcessExtensionLine, SaveExtensionConfig, BeginLoadProjectState, NULL};
-
+	
 	if (init)
 	{
-		g_pref.LoadGlobalPref();
-		g_loudnessWndManager.Init();
+		// check if libdi is present, if so load it and resolve function adresses
+		WDL_FastString dir1, dir2;
+		std::string str(GetAppVersion());
+
+#ifdef _WIN32
+		if (str.find("x64")) { // running REAPER x64?
+			dir1.SetFormatted(2048, "%s\\%s", GetResourcePath(), "Plugins\\libdi_64.dll");
+			dir2.SetFormatted(2048, "%s\\%s", GetResourcePath(), "UserPlugins\\libdi_64.dll");
+		}
+		else {
+			dir1.SetFormatted(2048, "%s\\%s", GetResourcePath(), "Plugins\\libdi_32.dll");
+			dir2.SetFormatted(2048, "%s\\%s", GetResourcePath(), "UserPlugins\\libdi_32.dll");
+		}
+#elif __APPLE__
+		dir1.SetFormatted(2048, "%s/%s", GetResourcePath(), "UserPlugins/libdi.dylib");
+		dir2.Set("/Library/Application Support/REAPER/UserPlugins/libdi.dylib");
+#else // Linux TODO
+
+#endif
+
+		hGetProcID_libdi = LoadLibrary(dir1.Get());
+		if (!hGetProcID_libdi) 
+		{	// check second path
+			hGetProcID_libdi = LoadLibrary(dir2.Get());
+			if (!hGetProcID_libdi)
+				return 0;
+		}
+			
+		// libdi is loaded, resolve function addresses
+		p_di_query_mem_size = (f_di_query_mem_size)GetProcAddress(hGetProcID_libdi, "di_query_mem_size");
+		if (!p_di_query_mem_size)
+			return 0;
+		
+		p_di_init = (f_di_init)GetProcAddress(hGetProcID_libdi, "di_init");
+		if (!p_di_init)
+			return 0;
+		
+		p_di_process = (f_di_process)GetProcAddress(hGetProcID_libdi, "di_process");
+		if (!p_di_process)
+			return 0;
+
+		// all functions resolved, register Dialogue Loudness actions
+		RegisterDialogueLoudnessActions();
+
+		g_NFpref.LoadGlobalPref();
+		g_NFloudnessWndManager.Init();
 		return plugin_register("projectconfig", &s_projectconfig);
 	}
-	else
+	else // exit
 	{
-		g_pref.SaveGlobalPref();
-		g_loudnessWndManager.Delete();
-		plugin_register("-projectconfig", &s_projectconfig);
+		if (hGetProcID_libdi)
+		{
+			FreeLibrary(hGetProcID_libdi);
+			g_NFpref.SaveGlobalPref();
+			g_NFloudnessWndManager.Delete();
+			plugin_register("-projectconfig", &s_projectconfig);
+		}
 		return 1;
 	}
 }
 
-void LoudnessUpdate (bool updatePreferencesDlg /*true*/)
+void NF_DialogueLoudness::LoudnessUpdate (bool updatePreferencesDlg /*true*/)
 {
-	if (BR_AnalyzeLoudnessWnd* dialog = g_loudnessWndManager.Get())
-		dialog->Update();
-	if (g_normalizeWnd)
-		SendMessage(g_normalizeWnd, WM_COMMAND, UPDATE_FROM_PROJDATA, 0);
+    
+	if (hGetProcID_libdi)
+	{
+		if (NF_AnalyzeLoudnessWnd* dialog = g_NFloudnessWndManager.Get())
+			dialog->Update();
+		if (g_NFnormalizeWnd)
+			SendMessage(g_NFnormalizeWnd, WM_COMMAND, UPDATE_FROM_PROJDATA, 0);
 
-	if (updatePreferencesDlg)
-		g_pref.UpdatePreferenceDlg();
+		if (updatePreferencesDlg)
+			g_NFpref.UpdatePreferenceDlg();
+	}
 }
 
 /******************************************************************************
 * Commands                                                                    *
 ******************************************************************************/
+int NF_DialogueLoudness::RegisterDialogueLoudnessActions()
+{
+	static COMMAND_T g_commandTable[] =
+	{
+		//!WANT_LOCALIZE_1ST_STRING_BEGIN:sws_actions
+
+		{ { DEFACCEL, "SWS/NF: Global dialogue loudness preferences..." }, "NF_DLG_LOUDNESS_PREF", NF_DialogueLoudness::NF_ToggleLoudnessPref, NULL, 0, NF_DialogueLoudness::IsLoudnessPrefVisible},
+		{ { DEFACCEL, "SWS/NF: Analyze dialogue loudness..." }, "NF_ANALYZE_DLG_LOUDNESS_DLG", NF_DialogueLoudness::NF_AnalyzeLoudness,    NULL, 0, NF_DialogueLoudness::IsAnalyzeLoudnessVisible },
+		{ { DEFACCEL, "SWS/NF: Normalize dialogue loudness of selected items/tracks..." }, "NF_NORMALIZE_DLG_LOUDNESS_ITEMS", NF_DialogueLoudness::NF_NormalizeLoudness,  NULL, 0, NF_DialogueLoudness::IsNormalizeLoudnessVisible},
+		{ { DEFACCEL, "SWS/NF: Normalize dialogue loudness of selected items to -23 LUFS" },  "NF_NORMALIZE_DLG_LOUDNESS_ITEMS23",   NF_DialogueLoudness::NF_NormalizeLoudness,  NULL, 1, },
+		{ { DEFACCEL, "SWS/NF: Normalize dialogue loudness of selected items to 0 LU" },      "NF_NORMALIZE_DLG_LOUDNESS_ITEMS_LU",NF_DialogueLoudness::NF_NormalizeLoudness,  NULL, -1, },
+		{ { DEFACCEL, "SWS/NF: Normalize dialogue loudness of selected tracks to -23 LUFS" }, "NF_NORMALIZE_DLG_LOUDNESS_TRACKS23",  NF_DialogueLoudness::NF_NormalizeLoudness,  NULL, 2, },
+		{ { DEFACCEL, "SWS/NF: Normalize dialogue loudness of selected tracks to 0 LU" },     "NF_NORMALIZE_DLG_LOUDNESS_TRACKS_LU", NF_DialogueLoudness::NF_NormalizeLoudness,  NULL, -2, },
+
+		//!WANT_LOCALIZE_1ST_STRING_END
+
+		{ {}, LAST_COMMAND, },
+	};
+
+	SWSRegisterCommands(g_commandTable);
+	return 1;
+}
+
 static WDL_DLGRET NormalizeCommandDialogProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 	if (INT_PTR r = SNM_HookThemeColorsMessage(hwnd, uMsg, wParam, lParam))
@@ -3955,7 +4186,7 @@ static WDL_DLGRET NormalizeCommandDialogProc (HWND hwnd, UINT uMsg, WPARAM wPara
 			// Set controls
 			WDL_UTF8_HookComboBox(GetDlgItem(hwnd, IDC_UNIT));
 			SendDlgItemMessage(hwnd, IDC_UNIT, CB_ADDSTRING, 0, (LPARAM)__LOCALIZE("LUFS", "sws_loudness"));
-			SendDlgItemMessage(hwnd, IDC_UNIT, CB_ADDSTRING, 0, (LPARAM)g_pref.GetFormatedLUString().Get());
+			SendDlgItemMessage(hwnd, IDC_UNIT, CB_ADDSTRING, 0, (LPARAM)g_NFpref.GetFormatedLUString().Get());
 			SendDlgItemMessage(hwnd, IDC_UNIT, CB_SETCURSEL, unit, 0);
 
 			_snprintfSafe(tmp, sizeof(tmp), "%.6g", value); SetDlgItemText(hwnd, IDC_VALUE, tmp);
@@ -3981,7 +4212,7 @@ static WDL_DLGRET NormalizeCommandDialogProc (HWND hwnd, UINT uMsg, WPARAM wPara
 				{
 					int unit = (int)SendDlgItemMessage(hwnd, IDC_UNIT, CB_GETCURSEL, 0, 0);
 					SendDlgItemMessage(hwnd, IDC_UNIT, CB_DELETESTRING, 1, 0);
-					SendDlgItemMessage(hwnd, IDC_UNIT, CB_ADDSTRING, 0, (LPARAM)g_pref.GetFormatedLUString().Get());
+					SendDlgItemMessage(hwnd, IDC_UNIT, CB_ADDSTRING, 0, (LPARAM)g_NFpref.GetFormatedLUString().Get());
 					SendDlgItemMessage(hwnd, IDC_UNIT, CB_SETCURSEL, unit, 0);
 				}
 				break;
@@ -3993,7 +4224,7 @@ static WDL_DLGRET NormalizeCommandDialogProc (HWND hwnd, UINT uMsg, WPARAM wPara
 						int unit = (int)SendDlgItemMessage(hwnd, IDC_UNIT, CB_GETCURSEL, 0, 0);
 						char value[256]; GetDlgItemText(hwnd, IDC_VALUE, value, sizeof(value));
 
-						_snprintfSafe(value, sizeof(value), "%.6g", (unit == 1) ? g_pref.LUFStoLU(AltAtof(value)) : g_pref.LUtoLUFS(AltAtof(value)));
+						_snprintfSafe(value, sizeof(value), "%.6g", (unit == 1) ? g_NFpref.LUFStoLU(AltAtof(value)) : g_NFpref.LUtoLUFS(AltAtof(value)));
 						SetDlgItemText(hwnd, IDC_VALUE, value);
 					}
 				}
@@ -4005,16 +4236,16 @@ static WDL_DLGRET NormalizeCommandDialogProc (HWND hwnd, UINT uMsg, WPARAM wPara
 					bool doTracks = ((int)SendDlgItemMessage(hwnd, IDC_TARGET, CB_GETCURSEL, 0, 0) == 1) ? true : false;
 					char value[256]; GetDlgItemText(hwnd, IDC_VALUE, value, sizeof(value));
 
-					WDL_PtrList_DeleteOnDestroy<BR_LoudnessObject> objects;
+					WDL_PtrList_DeleteOnDestroy<NF_LoudnessObject> objects;
 					if (doTracks)
 					{
 						// Can't analyze master for now (accessor doesn't take receives into account) but leave in case this changes
 						if (*(int*)GetSetMediaTrackInfo(GetMasterTrack(NULL), "I_SELECTED", NULL))
-							objects.Add(new BR_LoudnessObject(GetMasterTrack(NULL)));
+							objects.Add(new NF_LoudnessObject(GetMasterTrack(NULL)));
 
 						const int cnt=CountSelectedTracks(NULL);
 						for (int i = 0; i < cnt; ++i)
-							objects.Add(new BR_LoudnessObject(GetSelectedTrack(NULL, i)));
+							objects.Add(new NF_LoudnessObject(GetSelectedTrack(NULL, i)));
 					}
 					else
 					{
@@ -4022,23 +4253,23 @@ static WDL_DLGRET NormalizeCommandDialogProc (HWND hwnd, UINT uMsg, WPARAM wPara
 						for (int i = 0; i < cnt; ++i)
 						{
 							if (MediaItem_Take* take = GetActiveTake(GetSelectedMediaItem(NULL, i)))
-								objects.Add(new BR_LoudnessObject(take));
+								objects.Add(new NF_LoudnessObject(take));
 						}
 					}
-					BR_NormalizeData normalizeData = {&objects, (useLU) ? g_pref.LUtoLUFS(AltAtof(value)) : AltAtof(value), true, false};
+					NF_DialogueLoudness::NF_NormalizeData normalizeData = {&objects, (useLU) ? g_NFpref.LUtoLUFS(AltAtof(value)) : AltAtof(value), true, false};
 
 					DestroyWindow(hwnd);
-					RefreshToolbar(NamedCommandLookup("_BR_NORMALIZE_LOUDNESS_ITEMS"));
+					RefreshToolbar(NamedCommandLookup("_NF_NORMALIZE_DLG_LOUDNESS_ITEMS"));
 
 					if (objects.GetSize())
-						NormalizeAndShowProgress(&normalizeData);
+						NF_DialogueLoudness::NormalizeAndShowProgress(&normalizeData);
 				}
 				break;
 
 				case IDCANCEL:
 				{
 					DestroyWindow(hwnd);
-					RefreshToolbar(NamedCommandLookup("_BR_NORMALIZE_LOUDNESS_ITEMS"));
+					RefreshToolbar(NamedCommandLookup("_NF_NORMALIZE_DLG_LOUDNESS_ITEMS"));
 				}
 				break;
 			}
@@ -4057,419 +4288,83 @@ static WDL_DLGRET NormalizeCommandDialogProc (HWND hwnd, UINT uMsg, WPARAM wPara
 			WritePrivateProfileString("SWS", NORMALIZE_KEY, tmp, get_ini_file());
 
 			SaveWindowPos(hwnd, NORMALIZE_WND);
-			g_normalizeWnd = NULL;
+			g_NFnormalizeWnd = NULL;
 		}
 		break;
 	}
 	return 0;
 }
 
-void NormalizeLoudness (COMMAND_T* ct)
+void NF_DialogueLoudness::NF_NormalizeLoudness (COMMAND_T* ct)
 {
 	if ((int)ct->user == 0)
 	{
-		if (!g_normalizeWnd)
-			g_normalizeWnd = CreateDialog(g_hInst, MAKEINTRESOURCE(IDD_BR_LOUDNESS_NORMALIZE), g_hwndParent, NormalizeCommandDialogProc);
+		if (!g_NFnormalizeWnd)
+			g_NFnormalizeWnd = CreateDialog(g_hInst, MAKEINTRESOURCE(IDD_NF_DLG_LOUDNESS_NORMALIZE), g_hwndParent, NormalizeCommandDialogProc);
 		else
 		{
-			DestroyWindow(g_normalizeWnd);
-			g_normalizeWnd = NULL;
+			DestroyWindow(g_NFnormalizeWnd);
+			g_NFnormalizeWnd = NULL;
 		}
-		RefreshToolbar(NamedCommandLookup("_BR_NORMALIZE_LOUDNESS_ITEMS"));
+		RefreshToolbar(NamedCommandLookup("_NF_NORMALIZE_DLG_LOUDNESS_ITEMS"));
 	}
 	else
 	{
-		WDL_PtrList_DeleteOnDestroy<BR_LoudnessObject> objects;
+		WDL_PtrList_DeleteOnDestroy<NF_LoudnessObject> objects;
 		if (abs((int)ct->user) == 1)
 		{
 			const int cnt=CountSelectedMediaItems(NULL);
 			for (int i = 0; i < cnt; ++i)
 			{
 				if (MediaItem_Take* take = GetActiveTake(GetSelectedMediaItem(NULL, i)))
-					objects.Add(new BR_LoudnessObject(take));
+					objects.Add(new NF_LoudnessObject(take));
 			}
 		}
 		else
 		{
 			// Can't analyze master for now (accessor doesn't take receives into account) but leave in case this changes
 			if (*(int*)GetSetMediaTrackInfo(GetMasterTrack(NULL), "I_SELECTED", NULL))
-				objects.Add(new BR_LoudnessObject(GetMasterTrack(NULL)));
+				objects.Add(new NF_LoudnessObject(GetMasterTrack(NULL)));
 
 			const int trSelCnt = CountSelectedTracks(NULL);
 			for (int i = 0; i < trSelCnt; ++i)
-				objects.Add(new BR_LoudnessObject(GetSelectedTrack(NULL, i)));
+				objects.Add(new NF_LoudnessObject(GetSelectedTrack(NULL, i)));
 		}
 
-		BR_NormalizeData normalizeData = {&objects, ((int)ct->user < 0) ? g_pref.LUtoLUFS(0) : -23, true, false};
-		NormalizeAndShowProgress(&normalizeData);
+		NF_NormalizeData normalizeData = {&objects, ((int)ct->user < 0) ? g_NFpref.LUtoLUFS(0) : -23, true, false};
+		NF_DialogueLoudness::NormalizeAndShowProgress(&normalizeData);
 	}
 }
 
-void AnalyzeLoudness (COMMAND_T* ct)
+
+void NF_DialogueLoudness::NF_AnalyzeLoudness (COMMAND_T* ct)
 {
-	if (BR_AnalyzeLoudnessWnd* dialog = g_loudnessWndManager.Create())
+	if (NF_AnalyzeLoudnessWnd* dialog = g_NFloudnessWndManager.Create())
 		dialog->Show(true, true);
 }
 
-void ToggleLoudnessPref (COMMAND_T* ct)
+void NF_DialogueLoudness::NF_ToggleLoudnessPref (COMMAND_T* ct)
 {
-	g_pref.ShowPreferenceDlg(!g_pref.IsPreferenceDlgVisible());
-	RefreshToolbar(NamedCommandLookup("_BR_LOUDNESS_PREF"));
-}
-
-void ToggleHighPrecisionOption(COMMAND_T* ct)
-{
-	bool isHighPrecOptEnabled = !!IsHighPrecisionOptionEnabled(NULL); // creates window if necessary (calls g_loudnessWndManager.Create())
-
-	BR_AnalyzeLoudnessWnd* dialog = g_loudnessWndManager.Get();
-	dialog->SetProperty(BR_AnalyzeLoudnessWnd::DO_HIGH_PRECISION_MODE, !isHighPrecOptEnabled);
-	dialog->SaveProperties();
-	dialog->ClearList(); // force reanalyzing
-
-	RefreshToolbar(NamedCommandLookup("_BR_NF_TOGGLE_LOUDNESS_HIGH_PREC"));
+	g_NFpref.ShowPreferenceDlg(!g_NFpref.IsPreferenceDlgVisible());
+	RefreshToolbar(NamedCommandLookup("_NF_DLG_LOUDNESS_PREF"));
 }
 
 /******************************************************************************
 * Toggle states                                                               *
 ******************************************************************************/
-int IsNormalizeLoudnessVisible (COMMAND_T* ct)
+int NF_DialogueLoudness::IsNormalizeLoudnessVisible (COMMAND_T* ct)
 {
-	return g_normalizeWnd ? 1 : 0;
+	return g_NFnormalizeWnd ? 1 : 0;
 }
 
-int IsAnalyzeLoudnessVisible (COMMAND_T* ct)
+int NF_DialogueLoudness::IsAnalyzeLoudnessVisible (COMMAND_T* ct)
 {
-	if (BR_AnalyzeLoudnessWnd* dialog = g_loudnessWndManager.Get())
+	if (NF_AnalyzeLoudnessWnd* dialog = g_NFloudnessWndManager.Get())
 		return (int)dialog->IsWndVisible();
 	return 0;
 }
 
-int IsLoudnessPrefVisible (COMMAND_T* ct)
+int NF_DialogueLoudness::IsLoudnessPrefVisible (COMMAND_T* ct)
 {
-	return g_pref.IsPreferenceDlgVisible() ? 1 : 0;
+	return g_NFpref.IsPreferenceDlgVisible() ? 1 : 0;
 }
-
-int IsHighPrecisionOptionEnabled(COMMAND_T* ct)
-{
-	bool isHighPrecOptEnabled  = false;
-	if (g_loudnessWndManager.Get())
-		isHighPrecOptEnabled = g_loudnessWndManager.Get()->GetProperty(BR_AnalyzeLoudnessWnd::DO_HIGH_PRECISION_MODE);
-	else
-	{
-		if (BR_AnalyzeLoudnessWnd* dialog = g_loudnessWndManager.Create()) 
-		{
-			dialog->LoadProperties();
-			isHighPrecOptEnabled = dialog->GetProperty(BR_AnalyzeLoudnessWnd::DO_HIGH_PRECISION_MODE);
-		}
-	}
-
-	return isHighPrecOptEnabled;
-}
-
-
-//////////////////////////////////////////////////////////////////
-//                                                              //
-//    #880 Export Loudness analysis to ReaScript                //
-//                                                              //
-//////////////////////////////////////////////////////////////////
-static WDL_DLGRET NFAnalyzeLUFSProgressProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
-{
-	if (INT_PTR r = SNM_HookThemeColorsMessage(hwnd, uMsg, wParam, lParam))
-		return r;
-
-	static BR_NormalizeData* s_normalizeData = NULL;
-	static BR_LoudnessObject* s_currentItem = NULL;
-
-	static int  s_currentItemId = 0;
-	static bool s_analyzeInProgress = false;
-	static double s_itemsLen = 0;
-	static double s_currentItemLen = 0;
-	static double s_finishedItemsLen = 0;
-
-#ifndef _WIN32
-	static bool s_positionSet = false;
-#endif
-
-	switch (uMsg)
-	{
-	case WM_INITDIALOG:
-	{
-		// Reset variables
-		s_normalizeData = (BR_NormalizeData*)lParam;
-		if (!s_normalizeData || !s_normalizeData->items)
-		{
-			EndDialog(hwnd, 0);
-			return 0;
-		}
-
-		s_currentItemId = 0;
-		s_analyzeInProgress = false;
-		s_itemsLen = 0;
-		s_currentItemLen = 0;
-		s_finishedItemsLen = 0;
-
-		// Get progress data
-		for (int i = 0; i < s_normalizeData->items->GetSize(); ++i)
-		{
-			if (BR_LoudnessObject* item = s_normalizeData->items->Get(i))
-				s_itemsLen += item->GetAudioLength();
-		}
-		if (s_itemsLen == 0) s_itemsLen = 1; // to prevent division by zero
-
-
-#ifdef _WIN32
-		CenterDialog(hwnd, g_hwndParent, HWND_TOPMOST);
-#else
-		s_positionSet = false;
-#endif
-
-		// Start normalizing
-		SetTimer(hwnd, ANALYZE_TIMER_FREQ, 100, NULL);
-	}
-	break;
-
-#ifndef _WIN32
-	case WM_ACTIVATE:
-	{
-		// SetWindowPos doesn't seem to work in WM_INITDIALOG on OSX
-		// when creating a dialog with DialogBox so call here
-		if (!s_positionSet)
-			CenterDialog(hwnd, GetParent(hwnd), HWND_TOPMOST);
-		s_positionSet = true;
-	}
-	break;
-#endif
-
-	case WM_COMMAND:
-	{
-		switch (LOWORD(wParam))
-		{
-		case IDCANCEL:
-		{
-			KillTimer(hwnd, 1);
-			s_normalizeData = NULL;
-			if (s_currentItem)
-				s_currentItem->AbortAnalyze();
-			EndDialog(hwnd, 0);
-		}
-		break;
-		}
-	}
-	break;
-
-	case WM_TIMER:
-	{
-		if (!s_normalizeData)
-			return 0;
-
-		if (!s_analyzeInProgress)
-		{
-			// No more objects to analyze, normalize them
-			if (s_currentItemId >= s_normalizeData->items->GetSize())
-
-			{
-				s_normalizeData->normalized = true;
-				UpdateTimeline();
-				EndDialog(hwnd, 0);
-				return 0;
-			}
-
-
-			// Start analysis of the next item
-			if ((s_currentItem = s_normalizeData->items->Get(s_currentItemId)))
-			{
-				s_currentItemLen = s_currentItem->GetAudioLength();
-
-				// NF: only use high prec. mode in full analyzing mode (and user has set it in Options), disable in quick mode
-				bool wantHighPrecisionMode = false;
-				if (!s_normalizeData->quickMode)
-					wantHighPrecisionMode = true;
-
-				s_currentItem->Analyze(s_normalizeData->quickMode, s_normalizeData->items->Get(s_currentItemId)->GetDoTruePeak(), wantHighPrecisionMode ? s_normalizeData->items->Get(s_currentItemId)->GetDoHighPrecisionMode() : false);
-
-				s_analyzeInProgress = true;
-			}
-			else
-				++s_currentItemId;
-		}
-		else
-		{
-			if (s_currentItem->IsRunning())
-			{
-				double progress = (s_finishedItemsLen + s_currentItemLen * s_currentItem->GetProgress()) / s_itemsLen;
-				SendMessage(GetDlgItem(hwnd, IDC_PROGRESS), PBM_SETPOS, (int)(progress * 100), 0);
-			}
-			else
-			{
-				s_finishedItemsLen += s_currentItemLen;
-				double progress = s_finishedItemsLen / s_itemsLen;
-				SendMessage(GetDlgItem(hwnd, IDC_PROGRESS), PBM_SETPOS, (int)(progress * 100), 0);
-
-				s_analyzeInProgress = false;
-				++s_currentItemId;
-			}
-		}
-	}
-	break;
-
-	case WM_DESTROY:
-	{
-		KillTimer(hwnd, 1);
-		s_normalizeData = NULL;
-		if (s_currentItem)
-			s_currentItem->AbortAnalyze();
-		s_analyzeInProgress = false;
-	}
-	break;
-	}
-	return 0;
-}
-
-void NFAnalyzeItemsLoudnessAndShowProgress(BR_NormalizeData* analyzeData)
-{
-	static bool s_normalizeInProgress = false;
-
-	if (!s_normalizeInProgress)
-	{
-		// Kill all normalize dialogs prior to normalizing
-		if (BR_AnalyzeLoudnessWnd* dialog = g_loudnessWndManager.Get())
-			dialog->KillNormalizeDlg();
-		if (g_normalizeWnd)
-		{
-			DestroyWindow(g_normalizeWnd);
-			g_normalizeWnd = NULL;
-			// RefreshToolbar(NamedCommandLookup("_BR_NORMALIZE_LOUDNESS_ITEMS"));
-		}
-
-		s_normalizeInProgress = true;
-		DialogBoxParam(g_hInst, MAKEINTRESOURCE(IDD_NF_LOUDNESS_ANALYZE_PROGRESS), g_hwndParent, NFAnalyzeLUFSProgressProc, (LPARAM)analyzeData);
-		s_normalizeInProgress = false;
-	}
-}
-
-bool NFDoAnalyzeTakeLoudness_IntegratedOnly(MediaItem_Take* take, double* lufsIntegrated)
-{
-	bool success = false;
-
-	if (take) {
-		if (TakeIsMIDI(take)) // check for MIDI takes
-			return false;
-
-		WDL_PtrList_DeleteOnDestroy<BR_LoudnessObject> objects;
-		objects.Add(new BR_LoudnessObject(take));
-
-		bool isTargetValid = objects.Get(0)->CheckTarget(take);
-		if (isTargetValid) {
-			BR_NormalizeData analyzeData = { &objects, -23, true, false }; // quick mode, integrated only, targetLUFS isn't used here
-			NFAnalyzeItemsLoudnessAndShowProgress(&analyzeData);
-
-			if (analyzeData.normalized) { // here: checks if analysis is completed, returns false if e.g. user cancels analyse process
-				double returnLUFSintegrated;
-
-				objects.Get(0)->GetAnalyzeData(&returnLUFSintegrated, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
-				WritePtr(lufsIntegrated, returnLUFSintegrated);
-
-				success = true;
-			}
-		}
-	}
-	return success;
-}
-
-bool NFDoAnalyzeTakeLoudness(MediaItem_Take* take, bool analyzeTruePeak, double* lufsIntegrated, double* range, double* truePeak, double* truePeakPos, double* shortTermMax, double* momentaryMax)
-{
-	bool success = false;
-
-	if (take)
-	{
-		if (TakeIsMIDI(take)) // check for MIDI takes
-			return false;
-
-		WDL_PtrList_DeleteOnDestroy<BR_LoudnessObject> objects;
-		objects.Add(new BR_LoudnessObject(take));
-
-		bool isTargetValid = objects.Get(0)->CheckTarget(take);
-		if (isTargetValid)
-		{
-			objects.Get(0)->SetDoTruePeak(analyzeTruePeak);
-
-			// check if user set high precision mode 
-			bool doHighPrecisionMode = !!IsHighPrecisionOptionEnabled(NULL);
-			objects.Get(0)->SetDoHighPrecisionMode(doHighPrecisionMode);
-
-			BR_NormalizeData analyzeData = { &objects, -23, false, false }; // full analyze mode
-			NFAnalyzeItemsLoudnessAndShowProgress(&analyzeData);
-
-			if (analyzeData.normalized) {
-				double returnLUFSintegrated, returnRange, returnTruePeak, returnTruePeakPos, returnShortTermMax, returnMomentaryMax;
-
-				objects.Get(0)->GetAnalyzeData(&returnLUFSintegrated, &returnRange, &returnTruePeak, &returnTruePeakPos, &returnShortTermMax, &returnMomentaryMax, NULL, NULL);
-
-				WritePtr(lufsIntegrated, returnLUFSintegrated);
-				WritePtr(range, returnRange);
-				WritePtr(truePeak, returnTruePeak);
-				WritePtr(truePeakPos, returnTruePeakPos);
-				WritePtr(shortTermMax, returnShortTermMax);
-				WritePtr(momentaryMax, returnMomentaryMax);
-
-				success = true;
-			}
-		}
-	}
-	return success;
-}
-
-bool NFDoAnalyzeTakeLoudness2(MediaItem_Take* take, bool analyzeTruePeak, double* lufsIntegrated, double* range, double* truePeak, double* truePeakPos, double* shortTermMax, double* momentaryMax, double* shortTermMaxPos, double* momentaryMaxPos)
-{
-	bool success = false;
-
-	if (take)
-	{
-		if (TakeIsMIDI(take)) // check for MIDI takes
-			return false;
-
-		WDL_PtrList_DeleteOnDestroy<BR_LoudnessObject> objects;
-		objects.Add(new BR_LoudnessObject(take));
-
-		bool isTargetValid = objects.Get(0)->CheckTarget(take);
-		if (isTargetValid) {
-			objects.Get(0)->SetDoTruePeak(analyzeTruePeak);
-
-			// check if user set high precision mode 
-			bool doHighPrecisionMode = !!IsHighPrecisionOptionEnabled(NULL);
-			objects.Get(0)->SetDoHighPrecisionMode(doHighPrecisionMode);
-
-			BR_NormalizeData analyzeData = { &objects, -23, false, false }; // full analyze mode
-			NFAnalyzeItemsLoudnessAndShowProgress(&analyzeData);
-
-			if (analyzeData.normalized) {
-				double returnLUFSintegrated, returnRange, returnTruePeak, returnTruePeakPos, returnShortTermMax, returnMomentaryMax, returnShortTermMaxPos, returnMomentaryMaxPos;
-
-				objects.Get(0)->GetAnalyzeData(&returnLUFSintegrated, &returnRange, &returnTruePeak, &returnTruePeakPos, &returnShortTermMax, &returnMomentaryMax, NULL, NULL);
-
-				returnShortTermMaxPos = objects.Get(0)->GetMaxShorttermPos(true); // use project time
-				returnMomentaryMaxPos = objects.Get(0)->GetMaxMomentaryPos(true);
-
-
-				WritePtr(lufsIntegrated, returnLUFSintegrated);
-				WritePtr(range, returnRange);
-				WritePtr(truePeak, returnTruePeak);
-				WritePtr(truePeakPos, returnTruePeakPos);
-				WritePtr(shortTermMax, returnShortTermMax);
-				WritePtr(momentaryMax, returnMomentaryMax);
-
-				WritePtr(shortTermMaxPos, returnShortTermMaxPos);
-				WritePtr(momentaryMaxPos, returnMomentaryMaxPos);
-
-				success = true;
-			}
-		}
-	}
-	return success;
-}
-
-//////////////////////////////////////////////////////////////////
-//    E N D                                                     //
-//    #880 Export Loudness analysis to ReaScript                //
-//                                                              //
-//////////////////////////////////////////////////////////////////
