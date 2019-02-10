@@ -36,6 +36,9 @@
 #include "../reaper/localize.h"
 #include "../SnM/SnM_Misc.h" // NF fix: prevent items going offline, see AnalyzeData()
 
+#ifdef _WIN32
+	#include <array>
+#endif
 
 using namespace NF_DialogueLoudness;
 
