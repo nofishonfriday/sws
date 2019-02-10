@@ -4059,58 +4059,8 @@ void NF_AnalyzeLoudnessWnd::Properties::Save ()
 int NF_DialogueLoudness::LoudnessInitExit (bool init) // called from nofish_Init()
 {
 	static project_config_extension_t s_projectconfig = {ProcessExtensionLine, SaveExtensionConfig, BeginLoadProjectState, NULL};
-	
-	if (init)
-	{
-		// check if libdi is present, if so load it and resolve function adresses
-		WDL_FastString dir1, dir2;
-		std::string str(GetAppVersion());
 
-#ifdef _WIN32
-		if (str.find("x64")) { // running REAPER x64?
-			dir1.SetFormatted(2048, "%s\\%s", GetResourcePath(), "Plugins\\libdi_64.dll");
-			dir2.SetFormatted(2048, "%s\\%s", GetResourcePath(), "UserPlugins\\libdi_64.dll");
-		}
-		else {
-			dir1.SetFormatted(2048, "%s\\%s", GetResourcePath(), "Plugins\\libdi_32.dll");
-			dir2.SetFormatted(2048, "%s\\%s", GetResourcePath(), "UserPlugins\\libdi_32.dll");
-		}
-#elif __APPLE__
-		dir1.SetFormatted(2048, "%s/%s", GetResourcePath(), "UserPlugins/libdi.dylib");
-		dir2.Set("/Library/Application Support/REAPER/UserPlugins/libdi.dylib");
-#else // Linux TODO
-
-#endif
-
-		hGetProcID_libdi = LoadLibrary(dir1.Get());
-		if (!hGetProcID_libdi) 
-		{	// check second path
-			hGetProcID_libdi = LoadLibrary(dir2.Get());
-			if (!hGetProcID_libdi)
-				return 0;
-		}
-			
-		// libdi is loaded, resolve function addresses
-		p_di_query_mem_size = (f_di_query_mem_size)GetProcAddress(hGetProcID_libdi, "di_query_mem_size");
-		if (!p_di_query_mem_size)
-			return 0;
-		
-		p_di_init = (f_di_init)GetProcAddress(hGetProcID_libdi, "di_init");
-		if (!p_di_init)
-			return 0;
-		
-		p_di_process = (f_di_process)GetProcAddress(hGetProcID_libdi, "di_process");
-		if (!p_di_process)
-			return 0;
-
-		// all functions resolved, register Dialogue Loudness actions
-		RegisterDialogueLoudnessActions();
-
-		g_NFpref.LoadGlobalPref();
-		g_NFloudnessWndManager.Init();
-		return plugin_register("projectconfig", &s_projectconfig);
-	}
-	else // exit
+	if (!init)
 	{
 		if (hGetProcID_libdi)
 		{
@@ -4121,6 +4071,64 @@ int NF_DialogueLoudness::LoudnessInitExit (bool init) // called from nofish_Init
 		}
 		return 1;
 	}
+
+	const char *filename =
+#ifdef _WIN32
+#	ifdef _WIN64
+		"libdi64.dll"
+#	else
+		"libdi32.dll"
+#	endif
+#elif __APPLE__
+		"libdi.dylib"
+#else
+#	ifdef __x86_64__
+		"libdi64.so"
+#	else
+		"libdi32.so"
+#	endif
+#endif
+	;
+
+	std::array<char[2048], 2> path;
+	snprintf(path[0], sizeof(path[0]), "%s%cUserPlugins%c%s", GetResourcePath(),
+		PATH_SLASH_CHAR, PATH_SLASH_CHAR, filename);
+#ifdef __APPLE__
+	snprintf(path[1], sizeof(path[1]),
+		"/Library/Application Support/REAPER/UserPlugins/%s", filename);
+#else
+	snprintf(path[1], sizeof(path[1]), "%s%cPlugins%c%s", GetExePath(),
+		PATH_SLASH_CHAR, PATH_SLASH_CHAR, filename);
+#endif
+
+	for(size_t i = 0; i < path.size(); ++i)
+	{
+		if ((hGetProcID_libdi = LoadLibrary(path[i])))
+			break;
+	}
+
+	if (!hGetProcID_libdi)
+		return 0;
+
+	// libdi is loaded, resolve function addresses
+	p_di_query_mem_size = (f_di_query_mem_size)GetProcAddress(hGetProcID_libdi, "di_query_mem_size");
+	if (!p_di_query_mem_size)
+		return 0;
+
+	p_di_init = (f_di_init)GetProcAddress(hGetProcID_libdi, "di_init");
+	if (!p_di_init)
+		return 0;
+
+	p_di_process = (f_di_process)GetProcAddress(hGetProcID_libdi, "di_process");
+	if (!p_di_process)
+		return 0;
+
+	// all functions resolved, register Dialogue Loudness actions
+	RegisterDialogueLoudnessActions();
+
+	g_NFpref.LoadGlobalPref();
+	g_NFloudnessWndManager.Init();
+	return plugin_register("projectconfig", &s_projectconfig);
 }
 
 void NF_DialogueLoudness::LoudnessUpdate (bool updatePreferencesDlg /*true*/)
