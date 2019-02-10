@@ -185,21 +185,21 @@ static SWSProjConfig<WDL_PtrList_DeleteOnDestroy<NF_LoudnessObject> > g_NFanalyz
 static HWND                                                           g_NFnormalizeWnd = NULL;
 
 // Dialogue Intelligence library + functions pointers
-HINSTANCE hGetProcID_libdi;
+static HINSTANCE g_libdi = NULL;
 
 #ifdef _WIN32
-    typedef size_t(__stdcall *f_di_query_mem_size)(unsigned int sample_rate, unsigned int max_input_samples);
     typedef int(__stdcall *f_di_init)(void *p_inst, size_t num_bytes, unsigned int sample_rate, unsigned int max_input_samples);
     typedef int(__stdcall *f_di_process)(void *p_inst, float *p_samples, unsigned int num_samples);
+    typedef size_t(__stdcall *f_di_query_mem_size)(unsigned int sample_rate, unsigned int max_input_samples);
 #else
-    typedef size_t(*f_di_query_mem_size)(unsigned int sample_rate, unsigned int max_input_samples);
     typedef int(*f_di_init)(void *p_inst, size_t num_bytes, unsigned int sample_rate, unsigned int max_input_samples);
     typedef int(*f_di_process)(void *p_inst, float *p_samples, unsigned int num_samples);
+    typedef size_t(*f_di_query_mem_size)(unsigned int sample_rate, unsigned int max_input_samples);
 #endif
 
-f_di_query_mem_size p_di_query_mem_size;
-f_di_init p_di_init;
-f_di_process p_di_process;
+f_di_init di_init;
+f_di_process di_process;
+f_di_query_mem_size di_query_mem_size;
 
 /******************************************************************************
 * Loudness object                                                             *
@@ -362,7 +362,7 @@ double NF_LoudnessObject::GetColumnVal (int column, int mode)
 		break;
 
 		case COL_DLGPERC:
-			vector<int> v; 
+			vector<int> v;
 			this->GetAnalyzeData(NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &v);
 			returnVal = v[0]; // max. of all channels only for now
 		break;
@@ -1159,19 +1159,19 @@ unsigned WINAPI NF_LoudnessObject::AnalyzeData (void* loudnessObject)
 
 	// Prepare + init DI instances
 	// DI doc recommends separate DI instances per chan. Maximum of three DI instances, for chan's usually containing speech (l, r, center)
-	if (doDI) 
+	if (doDI)
 	{
-		size_t num_bytes = (*p_di_query_mem_size)(data.samplerate, sampleCount);
+		size_t num_bytes = di_query_mem_size(data.samplerate, sampleCount);
 
 		for (int i = 0; i < DIinstancesToAllocate; ++i) {
 			// void* di = (void *)malloc(num_bytes);
-			char* di = new (nothrow) char [num_bytes]; // C++ version 
+			char* di = new (nothrow) char [num_bytes]; // C++ version
 			if (!di) {
 				MessageBox(GetMainHwnd(), __LOCALIZE("Couldn't allocate enough memory.", "sws_mbox"), __LOCALIZE("Dialogue loudness - Error", "sws_mbox"), MB_OK);
 				return -1;
 			}
 
-			if ((*p_di_init)(di, num_bytes, data.samplerate, sampleCount) < 0) { // init failed
+			if (di_init(di, num_bytes, data.samplerate, sampleCount) < 0) { // init failed
 				// free(di);
 				delete[] di; // C++ version
 				di = NULL;
@@ -1186,7 +1186,7 @@ unsigned WINAPI NF_LoudnessObject::AnalyzeData (void* loudnessObject)
 		for (int j = 0; j < DIinstancesCount; j++)
 		{
 			vector<float> vf;
-			tempFloatBufs.push_back(vf); 
+			tempFloatBufs.push_back(vf);
 		}
 
 		// init other vectors used for analyzing
@@ -1196,7 +1196,7 @@ unsigned WINAPI NF_LoudnessObject::AnalyzeData (void* loudnessObject)
 	}
 
 	/*
-	DI produces invalid output (-1) while it's buffering (the first 2048 ms) 
+	DI produces invalid output (-1) while it's buffering (the first 2048 ms)
 	so fill it with zeroes until it produces the first valid output
 	somehow this seems to produce better (i.e. more close to LM-Correct) results
 	than the (I think) actually technical correct implementation to check if it's buffering (see below)
@@ -1205,7 +1205,7 @@ unsigned WINAPI NF_LoudnessObject::AnalyzeData (void* loudnessObject)
 	float* tempZeroedFloatBuf = new float[sampleCount](); // value initialization
 	for (int j = 0; j < DIinstancesCount; ++j)
 	{
-		while ((*p_di_process)(DIinstances.Get(j), tempZeroedFloatBuf, sampleCount) == -1) {}
+		while (di_process(DIinstances.Get(j), tempZeroedFloatBuf, sampleCount) == -1) {}
 	}
 	delete[] tempZeroedFloatBuf;
 
@@ -1231,7 +1231,7 @@ unsigned WINAPI NF_LoudnessObject::AnalyzeData (void* loudnessObject)
 		{
 			// clear vectors
 			for (int k = 0; k < DIinstancesCount; ++k) {
-				tempFloatBufs[k].clear(); 
+				tempFloatBufs[k].clear();
 				tempFloatBufs[k].reserve(sampleCount);
 			}
 		}
@@ -1244,7 +1244,7 @@ unsigned WINAPI NF_LoudnessObject::AnalyzeData (void* loudnessObject)
 		{
 			for (int j = 0; j < bufSz; ++j)
 			{
-				if (currentChannel <= DIinstancesCount) 
+				if (currentChannel <= DIinstancesCount)
 				{
 					tempFloatBufs[currentChannel - 1].push_back((float)undelayedBuf[j]);
 				}
@@ -1257,10 +1257,10 @@ unsigned WINAPI NF_LoudnessObject::AnalyzeData (void* loudnessObject)
 		// process DI, feed the deinterleaved float bufs
 		if (doDI)
 		{
-			for (int i = 0; i < DIinstancesCount; ++i) 
+			for (int i = 0; i < DIinstancesCount; ++i)
 			{
 				// we can pass (adress of) vector to DI since std::vector has guaranteed contiguous buffer
-				DIoutputs[i] = (*p_di_process)(DIinstances.Get(i), &tempFloatBufs[i][0], sampleCount); 
+				DIoutputs[i] = di_process(DIinstances.Get(i), &tempFloatBufs[i][0], sampleCount);
 
 				if (DIoutputs[i] == 1)
 					isSpeechCounts[i] += 1;
@@ -4056,22 +4056,8 @@ void NF_AnalyzeLoudnessWnd::Properties::Save ()
 /******************************************************************************
 * Loudness init/exit                                                          *
 ******************************************************************************/
-int NF_DialogueLoudness::LoudnessInitExit (bool init) // called from nofish_Init()
+static HINSTANCE LibDI_Load()
 {
-	static project_config_extension_t s_projectconfig = {ProcessExtensionLine, SaveExtensionConfig, BeginLoadProjectState, NULL};
-
-	if (!init)
-	{
-		if (hGetProcID_libdi)
-		{
-			FreeLibrary(hGetProcID_libdi);
-			g_NFpref.SaveGlobalPref();
-			g_NFloudnessWndManager.Delete();
-			plugin_register("-projectconfig", &s_projectconfig);
-		}
-		return 1;
-	}
-
 	const char *filename =
 #ifdef _WIN32
 #	ifdef _WIN64
@@ -4101,27 +4087,66 @@ int NF_DialogueLoudness::LoudnessInitExit (bool init) // called from nofish_Init
 		PATH_SLASH_CHAR, PATH_SLASH_CHAR, filename);
 #endif
 
-	for(size_t i = 0; i < path.size(); ++i)
+	for (size_t i = 0; i < path.size(); ++i)
 	{
-		if ((hGetProcID_libdi = LoadLibrary(path[i])))
-			break;
+		if (HINSTANCE libdi = LoadLibrary(path[i]))
+			return libdi;
 	}
 
-	if (!hGetProcID_libdi)
+	return NULL;
+}
+
+static bool LibDI_ImportAPI()
+{
+	struct DIAPI { void **func; const char *name; };
+
+#define IMPORT(func) {reinterpret_cast<void **>(&func), #func}
+
+	const std::array<DIAPI, 3> imports = {{
+		IMPORT(di_init),
+		IMPORT(di_process),
+		IMPORT(di_query_mem_size),
+	}};
+
+#undef IMPORT
+
+	for (size_t i = 0; i < imports.size(); ++i)
+	{
+		const DIAPI &import = imports[i];
+		*import.func = GetProcAddress(g_libdi, import.name);
+
+		if (!import.func)
+			return false;
+	}
+
+	return true;
+}
+
+int NF_DialogueLoudness::LoudnessInitExit (bool init) // called from nofish_Init()
+{
+	static project_config_extension_t s_projectconfig = {ProcessExtensionLine, SaveExtensionConfig, BeginLoadProjectState, NULL};
+
+	if (!init)
+	{
+		if (g_libdi)
+		{
+			FreeLibrary(g_libdi);
+			g_NFpref.SaveGlobalPref();
+			g_NFloudnessWndManager.Delete();
+			plugin_register("-projectconfig", &s_projectconfig);
+		}
+		return 1;
+	}
+
+	g_libdi = LibDI_Load();
+	if (!g_libdi)
 		return 0;
 
-	// libdi is loaded, resolve function addresses
-	p_di_query_mem_size = (f_di_query_mem_size)GetProcAddress(hGetProcID_libdi, "di_query_mem_size");
-	if (!p_di_query_mem_size)
-		return 0;
-
-	p_di_init = (f_di_init)GetProcAddress(hGetProcID_libdi, "di_init");
-	if (!p_di_init)
-		return 0;
-
-	p_di_process = (f_di_process)GetProcAddress(hGetProcID_libdi, "di_process");
-	if (!p_di_process)
-		return 0;
+	if (!LibDI_ImportAPI())
+	{
+		FreeLibrary(g_libdi);
+		g_libdi = NULL;
+	}
 
 	// all functions resolved, register Dialogue Loudness actions
 	RegisterDialogueLoudnessActions();
@@ -4133,8 +4158,7 @@ int NF_DialogueLoudness::LoudnessInitExit (bool init) // called from nofish_Init
 
 void NF_DialogueLoudness::LoudnessUpdate (bool updatePreferencesDlg /*true*/)
 {
-    
-	if (hGetProcID_libdi)
+	if (g_libdi)
 	{
 		if (NF_AnalyzeLoudnessWnd* dialog = g_NFloudnessWndManager.Get())
 			dialog->Update();
