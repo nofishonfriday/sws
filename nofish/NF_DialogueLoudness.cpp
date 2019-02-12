@@ -844,6 +844,7 @@ bool NF_LoudnessObject::CreateGraph (BR_Envelope& envelope, double minLUFS, doub
 
 	double position = start;
 	envelope.CreatePoint(envelope.CountPoints(), position, envelope.LaneMinValue(), LINEAR, 0, false);
+	position -= 2.048; // account for DI latency
 	position += (momentary) ? 0.4 : 3;
 
 	size_t size = values.size();
@@ -853,7 +854,8 @@ bool NF_LoudnessObject::CreateGraph (BR_Envelope& envelope, double minLUFS, doub
 
 		if (i != size-1)
 		{
-			envelope.CreatePoint(envelope.CountPoints(), position, value, LINEAR, 0, false);
+			if (position > start)
+				envelope.CreatePoint(envelope.CountPoints(), position, value, LINEAR, 0, false);
 			position += (momentary) ? 0.4 : 3;
 		}
 		else
