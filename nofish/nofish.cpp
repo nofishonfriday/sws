@@ -33,7 +33,8 @@
 #include "../Breeder/BR_ContinuousActions.h"
 #include "../Breeder/BR_Util.h"
 #include "../Breeder/BR_ReaScript.h" // BR_GetMouseCursorContext(), BR_ItemAtMouseCursor()
-
+#include "../SnM/SnM_Window.h"
+#include "../reaper/localize.h"
 
 //////////////////////////////////////////////////////////////////
 //                                                              //
@@ -361,6 +362,24 @@ void CycleTrackAutomationModes(COMMAND_T* ct)
 }
 
 
+// Toggle show / close action list
+int IsActionListVisible(COMMAND_T* = NULL)
+{
+	if (GetReaHwndByTitle(__localizeFunc("Actions", "DLG_274", 0)))
+		return 1;
+	else
+		return 0;
+}
+
+void CloseToggleActionList(COMMAND_T* ct)
+{
+	if (HWND hwndActions = GetReaHwndByTitle(__localizeFunc("Actions", "DLG_274", 0)))
+		SendMessage(hwndActions, WM_CLOSE, NULL, NULL);
+	else
+		if (ct->user == 1) // toggle show
+			Main_OnCommand(40605, 0); // Show action list
+}
+
 //////////////////////////////////////////////////////////////////
 //                                                              //
 // Register commands                                            //
@@ -393,6 +412,9 @@ static COMMAND_T g_commandTable[] =
 	{ { DEFACCEL, "SWS/NF: Cycle through MIDI recording modes" }, "NF_ME_CYCLE_MIDI_RECORD_MODES", NULL, NULL, 0, NULL, SECTION_MIDI_EDITOR, ME_CycleMIDIRecordingModes },
 	{ { DEFACCEL, "SWS/NF: Cycle through track automation modes" }, "NF_CYCLE_TRACK_AUTOMATION_MODES", CycleTrackAutomationModes },
 
+	// Toggle show / close action list
+	{ { DEFACCEL, "SWS/NF: Close action list" }, "NF_CLOSE_ACTION_LIST", CloseToggleActionList, NULL, 0},
+	{ { DEFACCEL, "SWS/NF: Toggle show/close action list" }, "NF_TOGGLE_SHOW_ACTION_LIST", CloseToggleActionList, NULL, 1, IsActionListVisible},
 
 	//!WANT_LOCALIZE_1ST_STRING_END
 
