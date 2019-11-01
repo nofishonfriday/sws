@@ -1,3 +1,9 @@
+Mouse context: 
++Support automation items
+ - Contextual toolbars: add automation item context (Issue 915)
+ - ReaScript API: add BR_GetMouseCursorContext_AutomationItem (added by nofish, using BR_ prefix for consistency with existing BR_GetMouseCursorContext_ functions)
+ Note: only works for automation items in envelope lane (currently), as automation items in media lane could cover media items so context detection would break
+
 !v2.11.0 pre-release build
 <strong>Reminder: this new SWS version requires REAPER v5.979+!</strong>
 

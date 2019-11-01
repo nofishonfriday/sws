@@ -443,6 +443,15 @@ void BR_GetMouseCursorContext (char* windowOut, int windowOut_sz, char* segmentO
 	if (detailsOut && detailsOut_sz > 0) snprintf(detailsOut, detailsOut_sz, "%s", g_mouseInfo.GetDetails());
 }
 
+int	BR_GetMouseCursorContext_AutomationItem()
+{
+	int AIid = g_mouseInfo.GetAIid();
+	if (AIid == -1)
+		return -1;
+	else
+		return AIid;
+}
+
 TrackEnvelope* BR_GetMouseCursorContext_Envelope (bool* takeEnvelopeOut)
 {
 	WritePtr(takeEnvelopeOut, g_mouseInfo.IsTakeEnvelope());

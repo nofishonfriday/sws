@@ -152,6 +152,25 @@ public:
 	double LaneMinValue ();    // Minimum drawable value
 	double LaneMaxValue ();    // Maximum drawable value
 
+	/* Get AI properties *, TODO: add AI properties setters */
+	size_t CountAI();
+	int    GetAIid(int AIidx); // 1
+	double GetAIposition(int AIidx); // 2
+	double GetAIlength(int AIidx); // 3
+	double GetAIoffset(int AIidx); // 4
+	double GetAIrate(int AIidx);  // 5
+	int    IsAIselected(int AIidx); // 6
+	double GetAIbaseline(int AIidx); // 7
+	double GetAIamplitude(int AIidx); // 8
+	int    IsAIlooped(int AIidx); // 9
+	int    GetAIunknown1(int AIidx); // 10
+	int    GetAIunknown2(int AIidx); // 11
+	int    GetAIpoolID(int AIidx); // 12
+	int    IsAImuted(int AIidx); // 13
+	int    GetAIunknown3(int AIidx); // 14
+	double GetAItransitionTimeSec(int AIidx); // 15
+	int    GetAIvolEnvMax(int AIidx); // 16
+
 	/* Set envelope properties */
 	void SetActive (bool active);
 	void SetAIoptions (int AIoptions);
@@ -186,23 +205,26 @@ private:
 		EnvProperties ();
 		EnvProperties (const EnvProperties& properties);
 		EnvProperties& operator=  (const EnvProperties& properties);
-		vector<WDL_FastString> automationItems;
-		//POOLEDENVINST id pos length offset rate timeBased baseline(.5=0) amplitude loop ? ?
-		// For now we're just storing as strings in properties and not handling parsing of these
-		//struct AutomationItem
-		//{
-		//	int id;
-		//	double position;
-		//	double length;
-		//	double offset;
-		//	double rate;
-		//	bool timeBased;
-		//	double baseline;
-		//	double amplitude;
-		//	bool loop;
-		//	bool extra1; // Not sure what the last 2 parameters are
-		//	bool extra2; 
-		//};
+		struct AutomationItem
+		{	// https://forum.cockos.com/showpost.php?p=2198410&postcount=116
+			int poolId; // pool identifier (pooled instances will have the same identifier), 1-based
+			double positionSec; // pos in sec
+			double lengthSec; // length in sec
+			double offsetSec; // start offset in sec
+			double rate; // min. 0.001; default 1.000
+			int selected; // bool, 1 is sel., 0 not sel.
+			double baseline; // 0(-100) to 1(+100); default 0.5(0)
+			double amplitude; // -2(-200) to 2(+200); default 1 (100)
+			int looped; // bool, default 1
+			int positionQN; // default 0
+			int lengthQN; // default 0
+			int creationOrder; // order (counter) in which this instance was created, including deleted ones, *1-based*
+			int mute; // 1 muted, 0 unmuted
+			int offsetQN; // default 0 (only used in certain contexts)
+			double transitionTimeSec;
+			int volEnvMax; // volume envelope maximum when this instance was created (matches the 1|4 bits of the "volenvrange" config variable: 0=+6dB, 1=+0dB, 4=+12dB, 5=+24dB) 
+		};
+		vector <AutomationItem> automationItems;
 	};
 	struct EnvPoint
 	{
